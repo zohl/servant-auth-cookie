@@ -1,0 +1,57 @@
+name:                servant-auth-cookie
+version:             0.1.0.0
+synopsis:            Authentication via encrypted cookies
+description:         Authentication via encrypted client-side cookies,
+                     inspired by client-session library by Michael Snoyman and based on
+                     ideas of the paper "A Secure Cookie Protocol" by Alex Liu et al.
+license:             GPL-3
+license-file:        LICENSE
+author:              Al Zohali
+maintainer:          Al Zohali <zohl@fmap.me>
+category:            Web
+build-type:          Simple
+cabal-version:       >=1.10
+
+
+source-repository head
+  type:     git
+  location: https://github.com/zohl/servant-auth-cookie.git
+
+
+library
+  exposed-modules:     
+    Servant.Server.Experimental.Auth.Cookie
+  build-depends: base >=4.8 && <4.9
+               , base64-bytestring
+               , bytestring
+               , cereal
+               , cookie
+               , cryptonite
+               , http-types
+               , memory
+               , servant
+               , servant-server
+               , time >=1.5 && <1.6
+               , transformers
+               , wai
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+
+
+executable example
+  main-is:             Main.hs
+  other-extensions:    DataKinds, TypeFamilies, DeriveGeneric, TypeOperators
+  build-depends: base >=4.8 && <4.9
+               , blaze-html
+               , blaze-markup
+               , bytestring
+               , cereal
+               , http-media
+               , servant
+               , servant-auth-cookie
+               , servant-server
+               , text
+               , wai
+               , warp
+  hs-source-dirs:      example
+  default-language:    Haskell2010
