@@ -1,5 +1,5 @@
 name:                servant-auth-cookie
-version:             0.1.0.0
+version:             0.1.0.1
 synopsis:            Authentication via encrypted cookies
 description:         Authentication via encrypted client-side cookies,
                      inspired by client-session library by Michael Snoyman and based on
@@ -21,7 +21,7 @@ source-repository head
 library
   exposed-modules:     
     Servant.Server.Experimental.Auth.Cookie
-  build-depends: base >=4.8 && <4.9
+  build-depends: base == 4.9.*
                , base64-bytestring
                , bytestring
                , cereal
@@ -31,7 +31,7 @@ library
                , memory
                , servant
                , servant-server
-               , time >=1.5 && <1.6
+               , time
                , transformers
                , wai
   hs-source-dirs:      src
@@ -41,11 +41,12 @@ library
 executable example
   main-is:             Main.hs
   other-extensions:    DataKinds, TypeFamilies, DeriveGeneric, TypeOperators
-  build-depends: base >=4.8 && <4.9
+  build-depends: base == 4.9.*
                , blaze-html
                , blaze-markup
                , bytestring
                , cereal
+               , mtl
                , http-media
                , servant
                , servant-auth-cookie

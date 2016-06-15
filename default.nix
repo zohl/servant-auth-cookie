@@ -1,11 +1,11 @@
 { mkDerivation, base, base64-bytestring, blaze-html, blaze-markup
 , bytestring, cereal, cookie, cryptonite, http-media, http-types
-, memory, servant, servant-server, stdenv, text, time, transformers
+, memory, mtl, servant, servant-server, stdenv, text, time, transformers
 , wai, warp
 }:
 mkDerivation {
   pname = "servant-auth-cookie";
-  version = "0.1.0.0";
+  version = "0.1.0.1";
   src = ./.;
   isLibrary = true;
   isExecutable = true;
