@@ -14,6 +14,8 @@ module Servant.Server.Experimental.Auth.Cookie (
   , Settings(..)
   , defaultSettings
 
+  , mkRandomSource
+
   , encryptCookie
   , decryptCookie
 
@@ -72,42 +74,44 @@ import Crypto.Hash                    (HashAlgorithm(..))
 import Crypto.Hash.Algorithms         (SHA256)
 import Crypto.MAC.HMAC                (HMAC)
 import qualified Crypto.MAC.HMAC as H (hmac)
-import Crypto.Random                  (drgNew, DRG(..))
+import Crypto.Random                  (drgNew, DRG(..), ChaChaDRG, getSystemDRG)
 
-import System.IO.Unsafe (unsafePerformIO)
+       
+data RandomSource d where
+  RandomSource :: (DRG d) => IO d -> IORef (d, Int) -> RandomSource d
+
+mkRandomSource :: forall d. (DRG d) => IO d -> IO (RandomSource d)
+mkRandomSource mkDRG = do
+  drg <- mkDRG
+  ref <- newIORef (drg, 0)
+  return $ RandomSource mkDRG ref
 
 
+refreshSource :: forall d. RandomSource d -> IO ()
+refreshSource (RandomSource mkDRG ref) = void $ forkIO refresh where
+  void f = f >> return ()
+
+  refresh = do
+    drg <- mkDRG
+    atomicWriteIORef ref (drg, 0) 
 
 
+getRandomBytes :: forall d. (DRG d) => Settings d -> Int -> IO ByteString
+getRandomBytes settings n = let
+  t = threshold settings
+  rs = randomSource settings
+  (RandomSource _ ref) = rs
+  in do 
+    (result, bytes) <- atomicModifyIORef ref $ \(drg, bytes) -> let
+      (result, drg') = randomBytesGenerate n drg
+      bytes'         = bytes + n
+      in ((drg', bytes'), (result, bytes')) 
+
+    when (bytes >= t) $ refreshSource rs
+
+    return $! result
 
 
-resetRef :: IORef a -> IO a -> IO ()
-resetRef ref f = (forkIO $ f >>= atomicWriteIORef ref) >> return ()
-
-
-data RandomSource m where
-  RandomSource :: (DRG a) => a -> Int -> RandomSource a
-
-rsThreshold :: Int
-rsThreshold = ivSize * 1024
-
-mkRandomSource :: IO (RandomSource _)
-mkRandomSource = RandomSource <$> drgNew <*> return 0
-
-rsRef :: IORef (RandomSource _)
-rsRef = unsafePerformIO $ mkRandomSource >>= newIORef
-{-# NOINLINE rsRef #-} 
-
-getRandomBytes :: Int -> IO ByteString
-getRandomBytes n = do
-  (result, bytes) <- atomicModifyIORef rsRef $ \(RandomSource drg bytes) -> let
-    (result, drg') = randomBytesGenerate n drg
-    bytes'         = bytes + n
-    in (RandomSource drg' (bytes + n), (result, bytes')) 
-
-  when (bytes >= rsThreshold) $ resetRef rsRef mkRandomSource
-
-  return $! result
 
 
 data ServerKey = ServerKey ByteString UTCTime
@@ -118,23 +122,32 @@ skThreshold = 60 * 60 * 24
 skLength :: Int
 skLength = 16
 
-mkServerKey :: IO ServerKey
-mkServerKey = ServerKey
+generateServerKey :: IO ServerKey
+generateServerKey = ServerKey
   <$> (fst . randomBytesGenerate skLength <$> drgNew)
   <*> (addUTCTime (fromIntegral skThreshold) <$> getCurrentTime)
 
-skRef :: IORef ServerKey
-skRef = unsafePerformIO $ mkServerKey >>= newIORef
-{-# NOINLINE skRef #-} 
 
-getServerKey :: IO ByteString
-getServerKey = do
-  (ServerKey key time) <- readIORef skRef
+mkServerKey :: IO (IORef ServerKey)
+mkServerKey = generateServerKey >>= newIORef
+
+
+refreshServerKey :: IORef ServerKey -> IO ()
+refreshServerKey ref = void $ forkIO refresh where
+  void f = f >> return ()
+  refresh = generateServerKey >>= atomicWriteIORef ref 
+
+
+getServerKey :: Settings d -> IO ByteString
+getServerKey settings = do
+  (ServerKey key time) <- readIORef (serverKey settings)
   currentTime          <- getCurrentTime
 
-  when (time < currentTime) $ resetRef skRef mkServerKey
-
+  when (time < currentTime) $ refreshServerKey (serverKey settings)
   return $! key
+
+
+
 
 
 data Cookie = Cookie {
@@ -206,11 +219,11 @@ decryptCookie serverKey currentTime s = do
 
 
 -- | Pack session object into a cookie
-encryptSession :: (Serialize a) => Int -> a -> IO ByteString
-encryptSession maxAge session = do
-  iv'         <- getRandomBytes 16
-  expiration' <- addUTCTime (fromIntegral maxAge) <$> getCurrentTime
-  serverKey   <- getServerKey 
+encryptSession :: (Serialize a, DRG d) => Settings d -> a -> IO ByteString
+encryptSession settings session = do
+  iv'         <- getRandomBytes settings 16
+  expiration' <- addUTCTime (fromIntegral (maxAge settings)) <$> getCurrentTime
+  serverKey   <- getServerKey settings
 
   return $ Base64.encode $ encryptCookie serverKey Cookie {
       iv         = iv' 
@@ -219,16 +232,16 @@ encryptSession maxAge session = do
     }
 
 -- | Unpack session object from a cookie
-decryptSession :: (Serialize a) => ByteString -> IO (Either String a)
-decryptSession s = do
+decryptSession :: (Serialize a, DRG d) => Settings d -> ByteString -> IO (Either String a)
+decryptSession settings s = do
   currentTime <- getCurrentTime 
-  serverKey   <- getServerKey
+  serverKey   <- getServerKey settings
   return $ (Base64.decode s) >>= (decryptCookie serverKey currentTime) >>= (runGet get . payload)
 
 
 
 
-data Settings = Settings {
+data Settings d = Settings {
     sessionField :: ByteString
     -- ^ Name of a cookie which stores session object
 
@@ -248,10 +261,22 @@ data Settings = Settings {
   , hideReason   :: Bool
     -- ^ Whether to print reason why the cookie was rejected
     -- (if False, errorMessage will be used instead)
+
+  , randomSource :: RandomSource d
+    -- ^ TODO
+
+  , threshold :: Int
+    -- ^ How much random bytes will be used before randomSource will be reset
+
+  , serverKey :: IORef ServerKey
+    -- ^ TODO
+
+  , serverKeyMaxAge :: Maybe Int
+    -- ^ TODO
   }
 
 
-defaultSettings :: Settings
+defaultSettings :: Settings _
 defaultSettings = Settings {
    sessionField = "Session"
  , cookieFlags = ["HttpOnly", "Secure"]
@@ -259,17 +284,18 @@ defaultSettings = Settings {
  , path = "/"
  , hideReason = True
  , errorMessage = "Not authorized"
+ , threshold = 1000
  }
-  
+
 
 type family AuthCookieData
 type instance AuthServerData (AuthProtect "cookie-auth") = AuthCookieData
 
 
 
-getSession :: forall a. (Serialize a) => Settings -> Request -> IO (Either String a)
+getSession :: forall a d. (Serialize a, DRG d) => Settings d -> Request -> IO (Either String a)
 getSession settings req = formatError <$>
-                             either (return . Left) decryptSession getSessionString where
+                            either (return . Left) (decryptSession settings) getSessionString where
 
   getSessionString :: Either String ByteString
   getSessionString = do
@@ -286,10 +312,10 @@ getSession settings req = formatError <$>
     result
 
 
-addSession :: (MonadIO m, Serialize a, AddHeader (h::Symbol) ByteString s r)
-                => Settings -> a -> s -> m r
+addSession :: (MonadIO m, Serialize a, AddHeader (h::Symbol) ByteString s r, DRG d)
+                => Settings d -> a -> s -> m r
 addSession settings a response = do
-  sessionString <- liftIO $ encryptSession (maxAge settings) a
+  sessionString <- liftIO $ encryptSession settings a
   return $ addHeader (toStrict $ toLazyByteString $ renderCookies $ [
                          ((sessionField settings), sessionString)
                        , ("Path"                 , (path settings))
@@ -297,7 +323,7 @@ addSession settings a response = do
                        ] ++ (map (\f -> (f, "")) (cookieFlags settings))) response
 
 
-defaultAuthHandler :: forall a. (Serialize a) => Settings -> AuthHandler Request a
+defaultAuthHandler :: forall a d. (Serialize a, DRG d) => Settings d -> AuthHandler Request a
 defaultAuthHandler settings = mkAuthHandler handler where
 
   handler :: Request -> Handler a
