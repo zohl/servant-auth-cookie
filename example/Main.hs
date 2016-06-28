@@ -39,6 +39,7 @@ import Text.Blaze.Html.Renderer.Utf8 (renderHtml)
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 
+import Crypto.Random (DRG, drgNew)
 
 data HTML
 
@@ -55,10 +56,10 @@ data Account = Account Int String String
 instance Serialize Account
 
 type instance AuthCookieData = Account
-  
+
 
 data LoginForm = LoginForm {
-  username :: String  
+  username :: String
 , password :: String
 } deriving (Eq, Show)
 
@@ -80,7 +81,7 @@ usersDB :: [Account]
 usersDB = [
     Account 101 "mr_foo" "password1"
   , Account 102 "mr_bar" "letmein"
-  , Account 103 "mr_baz" "baseball" 
+  , Account 103 "mr_baz" "baseball"
   ]
 
 userLookup :: String -> String -> [Account] -> Maybe Int
@@ -99,8 +100,8 @@ type ExampleAPI =
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] ByteString
 
 
-server :: Server ExampleAPI
-server = serveHome
+server :: (DRG d) => Settings d -> Server ExampleAPI
+server settings = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
     :<|> servePrivate where
@@ -110,8 +111,8 @@ server = serveHome
 
   serveLoginPost form = case userLookup (username form) (password form) usersDB of
     Nothing   -> return $ addHeader "" (render $ loginPage False)
-    Just uid' -> addSession 
-                   authSettings
+    Just uid' -> addSession
+                   settings
                    (Account uid' (username form) (password form))
                    (render $ redirectPage "/private")
 
@@ -120,21 +121,28 @@ server = serveHome
   render = toStrict . renderHtml
 
 
-authSettings :: Settings
-authSettings = defaultSettings {
-    cookieFlags = []
-  , hideReason = False
-  }
-
-app :: Application
-app = serveWithContext
+app :: (DRG d) => Settings d -> Application
+app settings = serveWithContext
   (Proxy :: Proxy ExampleAPI)
-  ((defaultAuthHandler authSettings :: AuthHandler Request Account) :. EmptyContext)
-  server
+  ((defaultAuthHandler settings :: AuthHandler Request Account) :. EmptyContext)
+  (server settings)
+
 
 main :: IO ()
-main = run 8080 app 
-    
+main = do
+
+  randomSource' <- mkRandomSource drgNew 1000
+  serverKey' <- mkServerKey Nothing
+
+  let authSettings = defaultSettings {
+    cookieFlags = []
+  , hideReason = False
+  , randomSource = randomSource'
+  , serverKey = serverKey'
+  }
+
+  run 8080 (app authSettings)
+
 
 pageMenu :: H.Html
 pageMenu = do
@@ -190,4 +198,5 @@ redirectPage uri = H.docTypeHtml $ do
     H.p $ do
       "If your browser does not refresh the page click "
       H.a ! A.href (H.toValue uri) $ "here"
+
 

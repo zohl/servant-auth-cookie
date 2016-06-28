@@ -46,6 +46,7 @@ executable example
                , blaze-markup
                , bytestring
                , cereal
+               , cryptonite
                , mtl
                , http-media
                , servant

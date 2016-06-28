@@ -15,6 +15,7 @@ module Servant.Server.Experimental.Auth.Cookie (
   , defaultSettings
 
   , mkRandomSource
+  , mkServerKey
 
   , encryptCookie
   , decryptCookie
@@ -26,11 +27,11 @@ module Servant.Server.Experimental.Auth.Cookie (
   , getSession
 
   , defaultAuthHandler
-  ) where 
+  ) where
 
 
 import Control.Monad.IO.Class
-import Control.Monad             (when)       
+import Control.Monad             (when)
 import Control.Concurrent
 import Data.Either (isLeft)
 import Data.Maybe                (fromMaybe, fromJust, isNothing)
@@ -47,7 +48,7 @@ import qualified Data.ByteString as BS            (length, splitAt, concat, pack
 import qualified Data.ByteString.Base64 as Base64 (encode, decode)
 import qualified Data.ByteString.Char8 as BS8
 
-       
+
 import Data.Serialize            (Serialize, put, get)
 import Data.Serialize.Put        (runPut)
 import Data.Serialize.Get        (runGet)
@@ -76,78 +77,78 @@ import Crypto.MAC.HMAC                (HMAC)
 import qualified Crypto.MAC.HMAC as H (hmac)
 import Crypto.Random                  (drgNew, DRG(..), ChaChaDRG, getSystemDRG)
 
-       
-data RandomSource d where
-  RandomSource :: (DRG d) => IO d -> IORef (d, Int) -> RandomSource d
 
-mkRandomSource :: forall d. (DRG d) => IO d -> IO (RandomSource d)
-mkRandomSource mkDRG = do
+data RandomSource d where
+  RandomSource :: (DRG d) => IO d -> Int -> IORef (d, Int) -> RandomSource d
+
+
+
+refreshRef :: _ -> _ -> IO ()
+refreshRef mkState ref = void $ forkIO refresh where
+  void f = f >> return ()
+  refresh = mkState >>= atomicWriteIORef ref
+
+
+
+mkRandomSourceState :: (DRG d) => IO d -> IO (d, Int)
+mkRandomSourceState mkDRG = do
   drg <- mkDRG
-  ref <- newIORef (drg, 0)
-  return $ RandomSource mkDRG ref
+  return (drg, 0)
+
+
+mkRandomSource :: forall d. (DRG d) => IO d -> Int -> IO (RandomSource d)
+mkRandomSource mkDRG threshold = (RandomSource mkDRG threshold)
+                             <$> (mkRandomSourceState mkDRG >>= newIORef)
 
 
 refreshSource :: forall d. RandomSource d -> IO ()
-refreshSource (RandomSource mkDRG ref) = void $ forkIO refresh where
-  void f = f >> return ()
-
-  refresh = do
-    drg <- mkDRG
-    atomicWriteIORef ref (drg, 0) 
+refreshSource (RandomSource mkDRG _ ref) = refreshRef (mkRandomSourceState mkDRG) ref
 
 
-getRandomBytes :: forall d. (DRG d) => Settings d -> Int -> IO ByteString
-getRandomBytes settings n = let
-  t = threshold settings
-  rs = randomSource settings
-  (RandomSource _ ref) = rs
-  in do 
+
+getRandomBytes :: forall d. (DRG d) => RandomSource d -> Int -> IO ByteString
+getRandomBytes rs@(RandomSource _ threshold ref) n = do
     (result, bytes) <- atomicModifyIORef ref $ \(drg, bytes) -> let
       (result, drg') = randomBytesGenerate n drg
       bytes'         = bytes + n
-      in ((drg', bytes'), (result, bytes')) 
+      in ((drg', bytes'), (result, bytes'))
 
-    when (bytes >= t) $ refreshSource rs
-
+    when (bytes >= threshold) $ refreshSource rs
     return $! result
 
 
 
-
-data ServerKey = ServerKey ByteString UTCTime
-
-skThreshold :: Int
-skThreshold = 60 * 60 * 24
+data ServerKey where
+  ServerKey :: Maybe Int -> IORef (ByteString, UTCTime) -> ServerKey
 
 skLength :: Int
 skLength = 16
 
-generateServerKey :: IO ServerKey
-generateServerKey = ServerKey
-  <$> (fst . randomBytesGenerate skLength <$> drgNew)
-  <*> (addUTCTime (fromIntegral skThreshold) <$> getCurrentTime)
+
+mkServerKeyState :: Maybe Int -> IO (ByteString, UTCTime)
+mkServerKeyState maxAge = do
+  key <- fst . randomBytesGenerate skLength <$> drgNew
+  time <- addUTCTime (fromIntegral (fromMaybe 0 maxAge)) <$> getCurrentTime
+  return (key, time)
+
+mkServerKey :: Maybe Int -> IO ServerKey
+mkServerKey maxAge = (ServerKey maxAge) <$> (mkServerKeyState maxAge >>= newIORef)
+
+refreshServerKey :: ServerKey -> IO ()
+refreshServerKey (ServerKey maxAge ref) = refreshRef (mkServerKeyState maxAge) ref
 
 
-mkServerKey :: IO (IORef ServerKey)
-mkServerKey = generateServerKey >>= newIORef
+getServerKey :: ServerKey -> IO ByteString
+getServerKey sk@(ServerKey maxAge ref) = do
+  (key, time) <- readIORef ref
+  currentTime <- getCurrentTime
 
+  let expired = ($ maxAge) $ maybe
+                  False
+                  (\dt -> currentTime > addUTCTime (fromIntegral dt) time)
 
-refreshServerKey :: IORef ServerKey -> IO ()
-refreshServerKey ref = void $ forkIO refresh where
-  void f = f >> return ()
-  refresh = generateServerKey >>= atomicWriteIORef ref 
-
-
-getServerKey :: Settings d -> IO ByteString
-getServerKey settings = do
-  (ServerKey key time) <- readIORef (serverKey settings)
-  currentTime          <- getCurrentTime
-
-  when (time < currentTime) $ refreshServerKey (serverKey settings)
+  when (expired) $ refreshServerKey sk
   return $! key
-
-
-
 
 
 data Cookie = Cookie {
@@ -183,11 +184,11 @@ splitMany :: (Int -> a -> (a, a)) -> [Int] -> a -> [a]
 splitMany _ [] s = [s]
 splitMany f (x:xs) s = let (chunk, rest) = f x s in chunk:(splitMany f xs rest)
 
-       
+
 -- | Encrypt given cookie with server key
 encryptCookie :: ByteString -> Cookie -> ByteString
 encryptCookie serverKey cookie = BS.concat [iv', expiration', payload', mac] where
-  iv'         = iv cookie 
+  iv'         = iv cookie
   expiration' = BS8.pack . formatTime defaultTimeLocale expirationFormat $ expiration cookie
   key         = hmac serverKey $ BS.concat [iv', expiration']
   payload'    = aes iv' key (payload cookie)
@@ -219,14 +220,14 @@ decryptCookie serverKey currentTime s = do
 
 
 -- | Pack session object into a cookie
-encryptSession :: (Serialize a, DRG d) => Settings d -> a -> IO ByteString
+encryptSession :: (Serialize a, DRG d) => Settings d-> a -> IO ByteString
 encryptSession settings session = do
-  iv'         <- getRandomBytes settings 16
+  iv'         <- getRandomBytes (randomSource settings) 16
   expiration' <- addUTCTime (fromIntegral (maxAge settings)) <$> getCurrentTime
-  serverKey   <- getServerKey settings
+  sk          <- getServerKey (serverKey settings)
 
-  return $ Base64.encode $ encryptCookie serverKey Cookie {
-      iv         = iv' 
+  return $ Base64.encode $ encryptCookie sk Cookie {
+      iv         = iv'
     , expiration = expiration'
     , payload    = (runPut $ put session)
     }
@@ -234,11 +235,9 @@ encryptSession settings session = do
 -- | Unpack session object from a cookie
 decryptSession :: (Serialize a, DRG d) => Settings d -> ByteString -> IO (Either String a)
 decryptSession settings s = do
-  currentTime <- getCurrentTime 
-  serverKey   <- getServerKey settings
+  currentTime <- getCurrentTime
+  serverKey   <- getServerKey (serverKey settings)
   return $ (Base64.decode s) >>= (decryptCookie serverKey currentTime) >>= (runGet get . payload)
-
-
 
 
 data Settings d = Settings {
@@ -265,14 +264,14 @@ data Settings d = Settings {
   , randomSource :: RandomSource d
     -- ^ TODO
 
-  , threshold :: Int
-    -- ^ How much random bytes will be used before randomSource will be reset
+  -- , threshold :: Int
+  --   -- ^ How much random bytes will be used before randomSource will be reset
 
-  , serverKey :: IORef ServerKey
+  , serverKey :: ServerKey
     -- ^ TODO
 
-  , serverKeyMaxAge :: Maybe Int
-    -- ^ TODO
+  -- , serverKeyMaxAge :: Maybe Int
+  --   -- ^ TODO
   }
 
 
@@ -284,13 +283,11 @@ defaultSettings = Settings {
  , path = "/"
  , hideReason = True
  , errorMessage = "Not authorized"
- , threshold = 1000
  }
 
 
 type family AuthCookieData
 type instance AuthServerData (AuthProtect "cookie-auth") = AuthCookieData
-
 
 
 getSession :: forall a d. (Serialize a, DRG d) => Settings d -> Request -> IO (Either String a)
@@ -301,11 +298,11 @@ getSession settings req = formatError <$>
   getSessionString = do
     let cookies = parseCookies <$> lookup hCookie (requestHeaders req)
     when (isNothing cookies) $ Left "No cookie header"
- 
+
     let sessionStr = lookup (sessionField settings) (fromJust cookies)
-    when (isNothing sessionStr) $ Left "No session cookie"  
+    when (isNothing sessionStr) $ Left "No session cookie"
     Right $ fromJust sessionStr
- 
+
   formatError :: Either String a -> Either String a
   formatError result = do
     when ((isLeft result) && (hideReason settings)) $ Left (errorMessage settings)
