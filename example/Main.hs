@@ -40,6 +40,8 @@ import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 
 import Crypto.Random (DRG, drgNew)
+import Crypto.Hash (HashAlgorithm)
+
 
 data HTML
 
@@ -100,7 +102,7 @@ type ExampleAPI =
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] ByteString
 
 
-server :: (DRG d) => Settings d -> Server ExampleAPI
+server :: (DRG d, HashAlgorithm h) => Settings d h -> Server ExampleAPI
 server settings = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
@@ -121,7 +123,7 @@ server settings = serveHome
   render = toStrict . renderHtml
 
 
-app :: (DRG d) => Settings d -> Application
+app :: (DRG d, HashAlgorithm h) => Settings d h -> Application
 app settings = serveWithContext
   (Proxy :: Proxy ExampleAPI)
   ((defaultAuthHandler settings :: AuthHandler Request Account) :. EmptyContext)
