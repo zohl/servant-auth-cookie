@@ -41,6 +41,7 @@ import qualified Text.Blaze.Html5.Attributes as A
 
 import Crypto.Random (DRG, drgNew)
 import Crypto.Hash (HashAlgorithm)
+import Crypto.Cipher.Types (BlockCipher)
 
 
 data HTML
@@ -102,7 +103,7 @@ type ExampleAPI =
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] ByteString
 
 
-server :: (DRG d, HashAlgorithm h) => Settings d h -> Server ExampleAPI
+server :: (DRG d, HashAlgorithm h, BlockCipher c) => Settings d h c -> Server ExampleAPI
 server settings = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
@@ -123,7 +124,7 @@ server settings = serveHome
   render = toStrict . renderHtml
 
 
-app :: (DRG d, HashAlgorithm h) => Settings d h -> Application
+app :: (DRG d, HashAlgorithm h, BlockCipher c) => Settings d h c -> Application
 app settings = serveWithContext
   (Proxy :: Proxy ExampleAPI)
   ((defaultAuthHandler settings :: AuthHandler Request Account) :. EmptyContext)
@@ -134,7 +135,7 @@ main :: IO ()
 main = do
 
   randomSource' <- mkRandomSource drgNew 1000
-  serverKey' <- mkServerKey Nothing
+  serverKey' <- mkServerKey 16 Nothing
 
   let authSettings = defaultSettings {
     cookieFlags = []

@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE PartialTypeSignatures      #-}
+{-# LANGUAGE Rank2Types                 #-}
 
 
 module Servant.Server.Experimental.Auth.Cookie (
@@ -64,7 +65,6 @@ import Servant.API.ResponseHeaders      (AddHeader)
 import Servant.Server                   (err403, errBody, Handler)
 import Servant.Server.Experimental.Auth (AuthHandler, AuthServerData, mkAuthHandler)
 
-
 import Web.Cookie                (parseCookies, renderCookies)
 
 import Crypto.Cipher.AES              (AES256)
@@ -76,22 +76,11 @@ import Crypto.MAC.HMAC                (HMAC)
 import qualified Crypto.MAC.HMAC as H (hmac)
 import Crypto.Random                  (drgNew, DRG(..), ChaChaDRG, getSystemDRG)
 
---
-skLength :: Int
-skLength = 16
 
+type GenericCipherAlgorithm c ba = (BlockCipher c, BA.ByteArray ba) =>
+  c -> IV c -> ba -> ba
 
-ivSize :: Int
-expirationSize :: Int
-macSize :: Int
-
-
-[ivSize, expirationSize, macSize] = [
-    blockSize (undefined::AES256)
-  , 14
-  , hashDigestSize (undefined::SHA256)
-  ]
---
+type CipherAlgorithm c = GenericCipherAlgorithm c ByteString
 
 
 data RandomSource d where
@@ -119,7 +108,6 @@ refreshSource :: forall d. RandomSource d -> IO ()
 refreshSource (RandomSource mkDRG _ ref) = refreshRef (mkRandomSourceState mkDRG) ref
 
 
-
 getRandomBytes :: forall d. (DRG d) => RandomSource d -> Int -> IO ByteString
 getRandomBytes rs@(RandomSource _ threshold ref) n = do
     (result, bytes) <- atomicModifyIORef ref $ \(drg, bytes) -> let
@@ -131,27 +119,24 @@ getRandomBytes rs@(RandomSource _ threshold ref) n = do
     return $! result
 
 
-
 data ServerKey where
-  ServerKey :: Maybe Int -> IORef (ByteString, UTCTime) -> ServerKey
+  ServerKey :: Int -> Maybe Int -> IORef (ByteString, UTCTime) -> ServerKey
 
-
-
-mkServerKeyState :: Maybe Int -> IO (ByteString, UTCTime)
-mkServerKeyState maxAge = do
-  key <- fst . randomBytesGenerate skLength <$> drgNew
+mkServerKeyState :: Int -> Maybe Int -> IO (ByteString, UTCTime)
+mkServerKeyState size maxAge = do
+  key <- fst . randomBytesGenerate size <$> drgNew
   time <- addUTCTime (fromIntegral (fromMaybe 0 maxAge)) <$> getCurrentTime
   return (key, time)
 
-mkServerKey :: Maybe Int -> IO ServerKey
-mkServerKey maxAge = (ServerKey maxAge) <$> (mkServerKeyState maxAge >>= newIORef)
+mkServerKey :: Int -> Maybe Int -> IO ServerKey
+mkServerKey size maxAge = (ServerKey size maxAge) <$> (mkServerKeyState size maxAge >>= newIORef)
 
 refreshServerKey :: ServerKey -> IO ()
-refreshServerKey (ServerKey maxAge ref) = refreshRef (mkServerKeyState maxAge) ref
+refreshServerKey (ServerKey size maxAge ref) = refreshRef (mkServerKeyState size maxAge) ref
 
 
 getServerKey :: ServerKey -> IO ByteString
-getServerKey sk@(ServerKey maxAge ref) = do
+getServerKey sk@(ServerKey size maxAge ref) = do
   (key, time) <- readIORef ref
   currentTime <- getCurrentTime
 
@@ -178,42 +163,52 @@ sign :: forall h. (HashAlgorithm h) => Proxy h -> ByteString -> ByteString -> By
 sign _ key msg = (BS.pack . BA.unpack) ((H.hmac key msg) :: HMAC h)
 
 
-aes :: ByteString -> ByteString -> ByteString -> ByteString
-aes iv key msg = (BS.pack . BA.unpack) (ctrCombine key' iv' msg) where
-  iv' = (fromMaybe (error "bad IV") (makeIV iv)) :: IV AES256
-  key' = (fromMaybe (error "bad key") (maybeCryptoError $ cipherInit key)) :: AES256
+applyCipherAlgorithm :: forall c. (BlockCipher c) =>
+  CipherAlgorithm c -> ByteString -> ByteString -> ByteString -> ByteString
+
+applyCipherAlgorithm f iv key msg = (BS.pack . BA.unpack) (f key' iv' msg) where
+  iv' = (fromMaybe (error "bad IV") (makeIV iv)) :: IV c
+  key' = (fromMaybe (error "bad key") (maybeCryptoError $ cipherInit key)) :: c
+
 
 splitMany :: (Int -> a -> (a, a)) -> [Int] -> a -> [a]
 splitMany _ [] s = [s]
 splitMany f (x:xs) s = let (chunk, rest) = f x s in chunk:(splitMany f xs rest)
 
 
-
 -- | Encrypt given cookie with server key
-encryptCookie :: forall h. (HashAlgorithm h) =>
-  Proxy h -> ByteString -> Cookie -> String -> ByteString
+encryptCookie :: forall h c. (HashAlgorithm h, BlockCipher c) =>
+  CipherAlgorithm c -> Proxy h -> ByteString -> Cookie -> String -> ByteString
 
-encryptCookie h serverKey cookie expirationFormat = BS.concat [iv', expiration', payload', mac] where
-  iv'         = iv cookie
-  expiration' = BS8.pack . formatTime defaultTimeLocale expirationFormat $ expiration cookie
-  key         = sign h serverKey $ BS.concat [iv', expiration']
-  payload'    = aes iv' key (payload cookie)
-  mac         = sign h serverKey $ BS.concat [iv', expiration', payload']
+encryptCookie f h serverKey cookie expFormat = BS.concat [
+    iv'
+  , expiration'
+  , payload'
+  , mac
+  ] where
+      iv'         = iv cookie
+      expiration' = BS8.pack . formatTime defaultTimeLocale expFormat $ expiration cookie
+      key         = sign h serverKey $ BS.concat [iv', expiration']
+      payload'    = applyCipherAlgorithm f iv' key (payload cookie)
+      mac         = sign h serverKey $ BS.concat [iv', expiration', payload']
 
 
 -- | Decrypt cookie from bytestring
-decryptCookie :: forall h. (HashAlgorithm h) =>
-  Proxy h -> ByteString -> UTCTime -> String -> ByteString -> Either String Cookie
+decryptCookie :: forall h c. (HashAlgorithm h, BlockCipher c) =>
+  CipherAlgorithm c -> Proxy h -> ByteString -> UTCTime -> (String, Int) -> ByteString
+  -> Either String Cookie
 
-decryptCookie h serverKey currentTime expirationFormat s = do
-  let [iv', expiration', payload', mac'] = splitMany BS.splitAt [
+decryptCookie f h serverKey currentTime (expFormat, expSize) s = do
+  let ivSize = blockSize (undefined::c)
+  let [iv' , expiration' , payload' , mac'] = splitMany BS.splitAt [
           ivSize
-        , expirationSize
-        , (BS.length s) - ivSize - expirationSize - macSize] s
+        , expSize
+        , (BS.length s) - ivSize - expSize - hashDigestSize (undefined::h)
+        ] s
 
   when (mac' /= (sign h serverKey $ BS.concat [iv', expiration', payload'])) $ Left "MAC failed"
 
-  let parsedTime = parseTimeM True defaultTimeLocale expirationFormat $ BS8.unpack expiration'
+  let parsedTime = parseTimeM True defaultTimeLocale expFormat $ BS8.unpack expiration'
   when (isNothing parsedTime) $ Left "Wrong time format"
 
   let expiration'' = fromJust parsedTime
@@ -224,12 +219,13 @@ decryptCookie h serverKey currentTime expirationFormat s = do
   Right Cookie {
       iv         = iv'
     , expiration = expiration''
-    , payload    = aes iv' key payload'
+    , payload    = applyCipherAlgorithm f iv' key payload'
     }
 
 
 -- | Pack session object into a cookie
-encryptSession :: (Serialize a, DRG d, HashAlgorithm h) => Settings d h -> a -> IO ByteString
+encryptSession :: (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
+  => Settings d h c -> a -> IO ByteString
 encryptSession settings session = do
   iv'         <- getRandomBytes (randomSource settings) 16
   expiration' <- addUTCTime (fromIntegral (maxAge settings)) <$> getCurrentTime
@@ -242,22 +238,30 @@ encryptSession settings session = do
     }
 
   return $ Base64.encode $ encryptCookie
-    (hashAlgorithm settings) sk cookie (expirationFormat settings)
+    (encryptAlgorithm settings)
+    (hashAlgorithm settings)
+    sk
+    cookie
+    (fst $ expirationFormat settings)
+
 
 -- | Unpack session object from a cookie
-decryptSession :: (Serialize a, DRG d, HashAlgorithm h)
-  => Settings d h -> ByteString -> IO (Either String a)
+decryptSession :: (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
+  => Settings d h c -> ByteString -> IO (Either String a)
 decryptSession settings s = do
   currentTime <- getCurrentTime
   serverKey   <- getServerKey (serverKey settings)
   return $ (Base64.decode s)
        >>= (decryptCookie
-             (hashAlgorithm settings) serverKey currentTime (expirationFormat settings))
+             (decryptAlgorithm settings) 
+             (hashAlgorithm settings)
+             serverKey
+             currentTime
+             (expirationFormat settings))
        >>= (runGet get . payload)
 
 
-
-data Settings d h = Settings {
+data Settings d h c = Settings {
     sessionField :: ByteString
     -- ^ Name of a cookie which stores session object
 
@@ -268,7 +272,7 @@ data Settings d h = Settings {
     -- ^ How much time (in seconds) the cookie will be valid
     -- (corresponds to Max-Age attribute)
 
-  , expirationFormat :: String
+  , expirationFormat :: (String, Int)
     -- ^ TODO
 
   , path         :: ByteString
@@ -288,19 +292,30 @@ data Settings d h = Settings {
     -- ^ Server key to encrypt cookies
 
   , hashAlgorithm :: Proxy h
+    -- ^ TODO
+
+  , cipher :: Proxy c
+    -- ^ TODO
+
+  , encryptAlgorithm :: CipherAlgorithm c
+  , decryptAlgorithm :: CipherAlgorithm c
+    -- ^ TODO
   }
 
 
-defaultSettings :: Settings _ _
+defaultSettings :: Settings _ _ _
 defaultSettings = Settings {
    sessionField = "Session"
  , cookieFlags = ["HttpOnly", "Secure"]
  , maxAge = 300
- , expirationFormat = "%0Y%m%d%H%M%S"
+ , expirationFormat = ("%0Y%m%d%H%M%S", 14)
  , path = "/"
  , hideReason = True
  , errorMessage = "Not authorized"
  , hashAlgorithm = (Proxy :: Proxy SHA256)
+ , cipher = (Proxy :: Proxy AES256)
+ , encryptAlgorithm = ctrCombine
+ , decryptAlgorithm = ctrCombine
  }
 
 
@@ -308,8 +323,8 @@ type family AuthCookieData
 type instance AuthServerData (AuthProtect "cookie-auth") = AuthCookieData
 
 
-getSession :: forall a d h. (Serialize a, DRG d, HashAlgorithm h)
-  => Settings d h -> Request -> IO (Either String a)
+getSession :: forall a d h c. (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
+  => Settings d h c -> Request -> IO (Either String a)
 getSession settings req = formatError <$>
                             either (return . Left) (decryptSession settings) getSessionString where
 
@@ -333,7 +348,8 @@ addSession :: ( MonadIO m
               , AddHeader (e::Symbol) ByteString s r
               , DRG d
               , HashAlgorithm h
-              ) => Settings d h -> a -> s -> m r
+              , BlockCipher c
+              ) => Settings d h c -> a -> s -> m r
 
 addSession settings a response = do
   sessionString <- liftIO $ encryptSession settings a
@@ -343,9 +359,8 @@ addSession settings a response = do
                        , ("Max-Age"              , BS8.pack $ show $ maxAge settings)
                        ] ++ (map (\f -> (f, "")) (cookieFlags settings))) response
 
-
-defaultAuthHandler :: forall a d h. (Serialize a, DRG d, HashAlgorithm h)
-  => Settings d h -> AuthHandler Request a
+defaultAuthHandler :: forall a d h c. (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
+  => Settings d h c -> AuthHandler Request a
 defaultAuthHandler settings = mkAuthHandler handler where
 
   handler :: Request -> Handler a
