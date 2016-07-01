@@ -19,8 +19,10 @@ source-repository head
 
 
 library
-  exposed-modules:     
+  exposed-modules:
     Servant.Server.Experimental.Auth.Cookie
+    Servant.Server.Experimental.Auth.Cookie.Internal
+
   build-depends: base == 4.9.*
                , base64-bytestring
                , bytestring
@@ -57,3 +59,24 @@ executable example
                , warp
   hs-source-dirs:      example
   default-language:    Haskell2010
+
+
+test-suite tests
+  type:           exitcode-stdio-1.0
+
+  hs-source-dirs: tests
+  main-is:        Main.hs
+
+  extensions: NamedFieldPuns
+
+  ghc-options: -Wall
+
+  build-depends: base == 4.9.*
+               , bytestring
+               , cryptonite
+               , deepseq
+               , HUnit
+               , servant-auth-cookie
+
+  default-language:    Haskell2010
+
