@@ -4,11 +4,12 @@ import Test.HUnit
 import Control.Monad
 import System.IO
 import System.Exit
--- import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay)
 import Servant.Server.Experimental.Auth.Cookie.Internal
--- import Control.DeepSeq
+import Control.DeepSeq
 
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
 import Crypto.Random (drgNew)
 
 
@@ -58,12 +59,19 @@ testServerKey = TestList [
       k <- getServerKey sk
       assertBool "A key has incorrect size" (BS.length k /= (keySize `div` 8))
 
--- TODO
---  , TestCase $ do
---      sk <- mkServerKey 16 (Just 1)
---      k1 <- putStrLn "foo" >> return "test"
---      k2 <- threadDelay 2000000 >> putStrLn "bar" >> return "test"
---      assertBool "Expired key wasn't reset" (k1 /= k2)
+  , TestCase $ do
+      sk <- mkServerKey 16 (Just 1)
+
+      -- TODO: This doesn't work in HUnit
+      -- k1 <- getServerKey sk
+      -- k2 <- threadDelay 2000000 >> getServerKey sk
+
+      -- This works, but I don't know what kind of magic happens here
+      getServerKey sk >>= (putStrLn . BS8.unpack)
+      threadDelay 2000000 >> getServerKey sk >>= (putStrLn . BS8.unpack)
+
+      k1 <- getServerKey sk
+      k2 <- getServerKey sk
+
+      assertBool "Expired key wasn't reset" (k1 /= k2)
   ]
-
-
