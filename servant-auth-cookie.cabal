@@ -77,6 +77,8 @@ test-suite tests
                , deepseq
                , HUnit
                , servant-auth-cookie
+               , servant-server
+               , time
 
   default-language:    Haskell2010
 
