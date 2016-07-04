@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE PartialTypeSignatures      #-}
 {-# LANGUAGE Rank2Types                 #-}
+{-# LANGUAGE RecordWildCards  #-}
 
 
 module Servant.Server.Experimental.Auth.Cookie.Internal where
@@ -47,8 +48,9 @@ import Servant.Server.Experimental.Auth (AuthHandler, AuthServerData, mkAuthHand
 
 import Web.Cookie                (parseCookies, renderCookies)
 
-import Crypto.Cipher.AES              (AES256)
-import Crypto.Cipher.Types            (ctrCombine, IV, makeIV, Cipher(..), BlockCipher(..))
+import Crypto.Cipher.AES              (AES256, AES192, AES128)
+import Crypto.Cipher.Types            (ctrCombine, IV, makeIV, Cipher(..), BlockCipher(..), KeySizeSpecifier(..))
+
 import Crypto.Error                   (maybeCryptoError)
 import Crypto.Hash                    (HashAlgorithm(..))
 import Crypto.Hash.Algorithms         (SHA256)
@@ -61,7 +63,6 @@ type GenericCipherAlgorithm c ba = (BlockCipher c, BA.ByteArray ba) =>
   c -> IV c -> ba -> ba
 
 type CipherAlgorithm c = GenericCipherAlgorithm c ByteString
-
 
 data RandomSource d where
   RandomSource :: (DRG d) => IO d -> Int -> IORef (d, Int) -> RandomSource d
@@ -151,6 +152,28 @@ applyCipherAlgorithm f iv key msg = (BS.pack . BA.unpack) (f key' iv' msg) where
   key' = (fromMaybe (error "bad key") (maybeCryptoError $ cipherInit key)) :: c
 
 
+mkProperKey :: KeySizeSpecifier -> ByteString -> ByteString
+mkProperKey kss s = BS8.take (getProperLength (BS8.length s) kss) s where
+  getProperLength :: Int -> KeySizeSpecifier -> Int
+
+  getProperLength x (KeySizeRange l r) = case x < l of
+    False -> min x r
+    True -> error $ "key size must be at least " ++ (show l)
+                 ++ " bytes (given " ++ (show x) ++ ")"
+
+  getProperLength x (KeySizeEnum ls) = let
+    ls' = filter (<= x) ls
+    in case (null ls') of
+         False -> foldl1 max ls'
+         True -> error $ "key size must be at least " ++ (show $ foldl1 min ls)
+                      ++ " bytes (given " ++ (show x) ++ ")"
+
+  getProperLength x (KeySizeFixed l) = case x < l of
+    False -> l
+    True -> error $ "key size must be at least " ++ (show l)
+                 ++ " bytes (given " ++ (show x) ++ ")"
+
+
 splitMany :: (Int -> a -> (a, a)) -> [Int] -> a -> [a]
 splitMany _ [] s = [s]
 splitMany f (x:xs) s = let (chunk, rest) = f x s in chunk:(splitMany f xs rest)
@@ -168,7 +191,9 @@ encryptCookie f h serverKey cookie expFormat = BS.concat [
   ] where
       iv'         = iv cookie
       expiration' = BS8.pack . formatTime defaultTimeLocale expFormat $ expiration cookie
-      key         = sign h serverKey $ BS.concat [iv', expiration']
+      key         = mkProperKey
+                      (cipherKeySize (undefined :: c))
+                      (sign h serverKey $ BS.concat [iv', expiration'])
       payload'    = applyCipherAlgorithm f iv' key (payload cookie)
       mac         = sign h serverKey $ BS.concat [iv', expiration', payload']
 
@@ -194,7 +219,9 @@ decryptCookie f h serverKey currentTime (expFormat, expSize) s = do
   let expiration'' = fromJust parsedTime
   when (currentTime >= expiration'') $ Left "Expired cookie"
 
-  let key = sign h serverKey $ BS.concat [iv', expiration']
+  let key = mkProperKey
+              (cipherKeySize (undefined :: c))
+              (sign h serverKey $ BS.concat [iv', expiration'])
 
   Right Cookie {
       iv         = iv'
@@ -202,88 +229,99 @@ decryptCookie f h serverKey currentTime (expFormat, expSize) s = do
     , payload    = applyCipherAlgorithm f iv' key payload'
     }
 
+unProxy :: forall a. Proxy a -> a
+unProxy _ = undefined
 
 -- | Pack session object into a cookie
-encryptSession :: (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
-  => Settings d h c -> a -> IO ByteString
-encryptSession settings session = do
-  iv'         <- getRandomBytes (randomSource settings) 16
-  expiration' <- addUTCTime (fromIntegral (maxAge settings)) <$> getCurrentTime
-  sk          <- getServerKey (serverKey settings)
+encryptSession :: forall a. (Serialize a) => Settings -> a -> IO ByteString
+encryptSession (Settings {..}) session = do
+  iv'         <- getRandomBytes randomSource (blockSize $ unProxy cipher)
+  expiration' <- addUTCTime (fromIntegral maxAge) <$> getCurrentTime
+  sk          <- getServerKey serverKey
+
+  -- TODO
+  let payload' = runPut $ put session
+  padding <- let
+        n = (BS8.length payload')
+        l = (16 - (n `mod` 16)) `mod` 16
+        in getRandomBytes randomSource l
 
   let cookie = Cookie  {
       iv         = iv'
     , expiration = expiration'
-    , payload    = (runPut $ put session)
+    , payload    = BS8.concat [payload', padding]
     }
 
   return $ Base64.encode $ encryptCookie
-    (encryptAlgorithm settings)
-    (hashAlgorithm settings)
+    encryptAlgorithm
+    hashAlgorithm
     sk
     cookie
-    (fst $ expirationFormat settings)
+    (fst $ expirationFormat)
 
 
 -- | Unpack session object from a cookie
-decryptSession :: (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
-  => Settings d h c -> ByteString -> IO (Either String a)
-decryptSession settings s = do
+decryptSession :: (Serialize a) => Settings -> ByteString -> IO (Either String a)
+decryptSession (Settings {..}) s = do
   currentTime <- getCurrentTime
-  serverKey   <- getServerKey (serverKey settings)
+  serverKey'  <- getServerKey serverKey
   return $ (Base64.decode s)
        >>= (decryptCookie
-             (decryptAlgorithm settings)
-             (hashAlgorithm settings)
-             serverKey
+             decryptAlgorithm
+             hashAlgorithm
+             serverKey'
              currentTime
-             (expirationFormat settings))
+             expirationFormat)
        >>= (runGet get . payload)
 
 
-data Settings d h c = Settings {
-    sessionField :: ByteString
-    -- ^ Name of a cookie which stores session object
+data Settings where
+  Settings :: ( DRG d
+              , HashAlgorithm h
+              , BlockCipher c
+              ) => {
+      sessionField :: ByteString
+      -- ^ Name of a cookie which stores session object
 
-  , cookieFlags  :: [ByteString]
-    -- ^ Session cookie's flags
+    , cookieFlags  :: [ByteString]
+      -- ^ Session cookie's flags
 
-  , maxAge       :: Int
-    -- ^ How much time (in seconds) the cookie will be valid
-    -- (corresponds to Max-Age attribute)
+    , maxAge       :: Int
+      -- ^ How much time (in seconds) the cookie will be valid
+      -- (corresponds to Max-Age attribute)
 
-  , expirationFormat :: (String, Int)
-    -- ^ TODO
+    , expirationFormat :: (String, Int)
+      -- ^ TODO
 
-  , path         :: ByteString
-    -- ^ Scope of the cookie (corresponds to Path attribute)
+    , path         :: ByteString
+      -- ^ Scope of the cookie (corresponds to Path attribute)
 
-  , errorMessage :: String
-    -- ^ Message to show in request when the cookie is invalid
+    , errorMessage :: String
+      -- ^ Message to show in request when the cookie is invalid
 
-  , hideReason   :: Bool
-    -- ^ Whether to print reason why the cookie was rejected
-    -- (if False, errorMessage will be used instead)
+    , hideReason   :: Bool
+      -- ^ Whether to print reason why the cookie was rejected
+      -- (if False, errorMessage will be used instead)
 
-  , randomSource :: RandomSource d
-    -- ^ Random source for IV
+    , randomSource :: RandomSource d
+      -- ^ Random source for IV
 
-  , serverKey :: ServerKey
-    -- ^ Server key to encrypt cookies
+    , serverKey :: ServerKey
+      -- ^ Server key to encrypt cookies
 
-  , hashAlgorithm :: Proxy h
-    -- ^ TODO
+    , hashAlgorithm :: Proxy h
+      -- ^ TODO
 
-  , cipher :: Proxy c
-    -- ^ TODO
+    , cipher :: Proxy c
+      -- ^ TODO
 
-  , encryptAlgorithm :: CipherAlgorithm c
-  , decryptAlgorithm :: CipherAlgorithm c
-    -- ^ TODO
-  }
+    , encryptAlgorithm :: CipherAlgorithm c
+    , decryptAlgorithm :: CipherAlgorithm c
+      -- ^ TODO
+    } -> Settings
 
 
-defaultSettings :: Settings _ _ _
+defaultSettings :: Settings
 defaultSettings = Settings {
    sessionField = "Session"
  , cookieFlags = ["HttpOnly", "Secure"]
@@ -296,6 +334,8 @@ defaultSettings = Settings {
  , cipher = (Proxy :: Proxy AES256)
  , encryptAlgorithm = ctrCombine
  , decryptAlgorithm = ctrCombine
+ , serverKey = undefined
+ , randomSource = (undefined :: RandomSource ChaChaDRG)
  }
 
 
@@ -303,8 +343,7 @@ type family AuthCookieData
 type instance AuthServerData (AuthProtect "cookie-auth") = AuthCookieData
 
 
-getSession :: forall a d h c. (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
-  => Settings d h c -> Request -> IO (Either String a)
+getSession :: forall a. (Serialize a) => Settings -> Request -> IO (Either String a)
 getSession settings req = formatError <$>
                             either (return . Left) (decryptSession settings) getSessionString where
 
@@ -326,21 +365,17 @@ getSession settings req = formatError <$>
 addSession :: ( MonadIO m
               , Serialize a
               , AddHeader (e::Symbol) ByteString s r
-              , DRG d
-              , HashAlgorithm h
-              , BlockCipher c
-              ) => Settings d h c -> a -> s -> m r
+              ) => Settings -> a -> s -> m r
 
-addSession settings a response = do
+addSession settings@(Settings {..}) a response = do
   sessionString <- liftIO $ encryptSession settings a
   return $ addHeader (toStrict $ toLazyByteString $ renderCookies $ [
-                         ((sessionField settings), sessionString)
-                       , ("Path"                 , (path settings))
-                       , ("Max-Age"              , BS8.pack $ show $ maxAge settings)
-                       ] ++ (map (\f -> (f, "")) (cookieFlags settings))) response
+                         (sessionField, sessionString)
+                       , ("Path"                 , path)
+                       , ("Max-Age"              , BS8.pack $ show maxAge)
+                       ] ++ (map (\f -> (f, "")) cookieFlags)) response
 
-defaultAuthHandler :: forall a d h c. (Serialize a, DRG d, HashAlgorithm h, BlockCipher c)
-  => Settings d h c -> AuthHandler Request a
+defaultAuthHandler :: forall a. (Serialize a) => Settings -> AuthHandler Request a
 defaultAuthHandler settings = mkAuthHandler handler where
 
   handler :: Request -> Handler a

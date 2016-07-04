@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE RecordWildCards            #-}
 
 import Control.Monad (when)
 
@@ -103,7 +104,7 @@ type ExampleAPI =
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] ByteString
 
 
-server :: (DRG d, HashAlgorithm h, BlockCipher c) => Settings d h c -> Server ExampleAPI
+server :: Settings -> Server ExampleAPI
 server settings = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
@@ -124,7 +125,7 @@ server settings = serveHome
   render = toStrict . renderHtml
 
 
-app :: (DRG d, HashAlgorithm h, BlockCipher c) => Settings d h c -> Application
+app :: Settings -> Application
 app settings = serveWithContext
   (Proxy :: Proxy ExampleAPI)
   ((defaultAuthHandler settings :: AuthHandler Request Account) :. EmptyContext)
@@ -137,11 +138,12 @@ main = do
   randomSource' <- mkRandomSource drgNew 1000
   serverKey' <- mkServerKey 16 Nothing
 
-  let authSettings = defaultSettings {
+  let authSettings = ($ defaultSettings) $ \(Settings {..}) -> Settings {
     cookieFlags = []
   , hideReason = False
   , randomSource = randomSource'
   , serverKey = serverKey'
+  , ..
   }
 
   run 8080 (app authSettings)

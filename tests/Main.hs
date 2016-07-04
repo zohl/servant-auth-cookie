@@ -15,9 +15,9 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 
 import Crypto.Random (drgNew)
-import Crypto.Hash (HashAlgorithm, SHA256)
+import Crypto.Hash (HashAlgorithm, SHA512, SHA256)
 import Crypto.Cipher.Types (BlockCipher, ctrCombine, cbcEncrypt, cbcDecrypt, cfbEncrypt, cfbDecrypt)
-import Crypto.Cipher.AES   (AES256)
+import Crypto.Cipher.AES (AES256, AES192, AES128)
 
 
 tests :: [Test]
@@ -33,7 +33,6 @@ main = do
 
   Counts {cases, tried, errors, failures} <- runTestTT $ TestList tests
   when (cases /= tried || errors /= 0 || failures /= 0) $ exitFailure
-
 
 
 testRandomSource :: Test
@@ -74,7 +73,7 @@ testServerKey = TestList [
       -- k1 <- getServerKey sk
       -- k2 <- threadDelay 2000000 >> getServerKey sk
 
-      -- This works, but I don't know what kind of magic happens here
+      -- This (sometimes) works, but I don't know what kind of magic happens here
       getServerKey sk >>= (putStrLn . BS8.unpack)
       threadDelay 2000000 >> getServerKey sk >>= (putStrLn . BS8.unpack)
 
@@ -91,6 +90,10 @@ testCookie = TestList [
       testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cbcEncrypt cbcDecrypt 64
     , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cfbEncrypt cfbDecrypt 64
     , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+
+    , testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+    , testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES192) ctrCombine ctrCombine 100
+    , testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES128) ctrCombine ctrCombine 100
     ]
   ] where
       expFormat :: (String, Int)
@@ -150,3 +153,4 @@ testCookie = TestList [
                          "Decrypted message differs from the original one"
                          (payload cookie)
                          (payload cookie'))
+
