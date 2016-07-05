@@ -15,7 +15,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 
 import Crypto.Random (drgNew)
-import Crypto.Hash (HashAlgorithm, SHA512, SHA256)
+import Crypto.Hash (HashAlgorithm, SHA512, SHA384, SHA256)
 import Crypto.Cipher.Types (BlockCipher, ctrCombine, cbcEncrypt, cbcDecrypt, cfbEncrypt, cfbDecrypt)
 import Crypto.Cipher.AES (AES256, AES192, AES128)
 
@@ -87,13 +87,32 @@ testServerKey = TestList [
 testCookie :: Test
 testCookie = TestList [
   TestLabel "ciphers" $ TestList [
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cbcEncrypt cbcDecrypt 64
-    , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cfbEncrypt cfbDecrypt 64
-    , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+      TestLabel "different algorithms" $ TestList [
+          testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cbcEncrypt cbcDecrypt 64
+        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cfbEncrypt cfbDecrypt 64
+        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+        ]
+    , TestLabel "different ciphers" $ TestList [
+          testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES192) ctrCombine ctrCombine 100
+        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES128) ctrCombine ctrCombine 100
+        ]
+    , TestLabel "different hashes" $ TestList [
+          testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+        , testCipher (Proxy :: Proxy SHA384) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+        ]
+    , TestLabel "bad cases" $ TestList [
+          testCustomCookie
+            (mkCookie 10 100)
+            (return . BS8.drop 1)
+            (either (== errBadMAC) (const False))
 
-    , testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-    , testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES192) ctrCombine ctrCombine 100
-    , testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES128) ctrCombine ctrCombine 100
+        , testCustomCookie
+            (mkCookie 0 100)
+            (return)
+            (either (== errExpired) (const False))
+        ]
     ]
   ] where
       expFormat :: (String, Int)
@@ -117,27 +136,30 @@ testCookie = TestList [
 
 
       cipherId :: forall h c. (HashAlgorithm h, BlockCipher c) =>
-        Proxy h -> Proxy c -> CipherAlgorithm c -> CipherAlgorithm c -> Cookie
+        Proxy h -> Proxy c -> CipherAlgorithm c -> CipherAlgorithm c
+        -> IO Cookie
+        -> (BS8.ByteString -> IO BS8.ByteString)
         -> IO (Either String Cookie)
 
-      cipherId h _ encryptionAlgorithm decryptionAlgorithm cookie = do
-        key <- mkServerKey 16 Nothing >>= getServerKey
-        currentTime <- getCurrentTime
+      cipherId h _ encryptAlgo decryptAlgo mkCookie encryptionHook = do
 
-        let msg = encryptCookie
-                    encryptionAlgorithm
-                    h
-                    key
-                    cookie
-                    (fst expFormat)
+          cookie'     <- mkCookie
+          key         <- mkServerKey 16 Nothing >>= getServerKey
+          currentTime <- getCurrentTime
+          msg         <- encryptionHook $ encryptCookie
+                           encryptAlgo
+                           h
+                           key
+                           cookie'
+                           (fst expFormat)
 
-        return $ decryptCookie
-                   decryptionAlgorithm
-                   h
-                   key
-                   currentTime
-                   expFormat
-                   msg
+          return $ decryptCookie
+                     decryptAlgo
+                     h
+                     key
+                     currentTime
+                     expFormat
+                     msg
 
 
       testCipher :: (HashAlgorithm h, BlockCipher c) =>
@@ -145,7 +167,7 @@ testCookie = TestList [
 
       testCipher h c encryptionAlgorithm decryptionAlgorithm size = TestCase $ do
         cookie <- mkCookie 10 size
-        res <- cipherId h c encryptionAlgorithm decryptionAlgorithm cookie
+        res <- cipherId h c encryptionAlgorithm decryptionAlgorithm (return cookie) return
 
         ($ res) $ either
           assertFailure
@@ -153,4 +175,17 @@ testCookie = TestList [
                          "Decrypted message differs from the original one"
                          (payload cookie)
                          (payload cookie'))
+
+
+      testCustomCookie :: IO Cookie -> (BS8.ByteString -> IO BS8.ByteString) ->
+        (Either String Cookie -> Bool) -> Test
+
+      testCustomCookie mkCookie encryptionHook check = TestCase $ do
+        res <- cipherId
+          (Proxy :: Proxy SHA256)
+          (Proxy :: Proxy AES256)
+          ctrCombine ctrCombine
+          mkCookie encryptionHook
+
+        assertBool "Unexpected result of decryption" (check res)
 

@@ -59,6 +59,27 @@ import qualified Crypto.MAC.HMAC as H (hmac)
 import Crypto.Random                  (drgNew, DRG(..), ChaChaDRG, getSystemDRG)
 
 
+errBadIV :: String
+errBadIV = "bad IV"
+
+errBadKey :: String
+errBadKey = "bad key"
+
+errShortKey :: Int -> Int -> String
+errShortKey x y = "key size must be at least " ++ (show x) ++ " bytes (given " ++ (show y) ++ ")"
+
+errBadMAC :: String
+errBadMAC = "bad MAC"
+
+errBadTimeFormat :: String
+errBadTimeFormat = "bad time format"
+
+errExpired :: String
+errExpired = "expired cookie"
+
+
+
+
 type GenericCipherAlgorithm c ba = (BlockCipher c, BA.ByteArray ba) =>
   c -> IV c -> ba -> ba
 
@@ -148,8 +169,8 @@ applyCipherAlgorithm :: forall c. (BlockCipher c) =>
   CipherAlgorithm c -> ByteString -> ByteString -> ByteString -> ByteString
 
 applyCipherAlgorithm f iv key msg = (BS.pack . BA.unpack) (f key' iv' msg) where
-  iv' = (fromMaybe (error "bad IV") (makeIV iv)) :: IV c
-  key' = (fromMaybe (error "bad key") (maybeCryptoError $ cipherInit key)) :: c
+  iv' = (fromMaybe (error errBadIV) (makeIV iv)) :: IV c
+  key' = (fromMaybe (error errBadKey) (maybeCryptoError $ cipherInit key)) :: c
 
 
 mkProperKey :: KeySizeSpecifier -> ByteString -> ByteString
@@ -158,20 +179,17 @@ mkProperKey kss s = BS8.take (getProperLength (BS8.length s) kss) s where
 
   getProperLength x (KeySizeRange l r) = case x < l of
     False -> min x r
-    True -> error $ "key size must be at least " ++ (show l)
-                 ++ " bytes (given " ++ (show x) ++ ")"
+    True -> error $ errShortKey l x
 
   getProperLength x (KeySizeEnum ls) = let
     ls' = filter (<= x) ls
     in case (null ls') of
          False -> foldl1 max ls'
-         True -> error $ "key size must be at least " ++ (show $ foldl1 min ls)
-                      ++ " bytes (given " ++ (show x) ++ ")"
+         True -> error $ errShortKey (foldl1 min ls) x
 
   getProperLength x (KeySizeFixed l) = case x < l of
     False -> l
-    True -> error $ "key size must be at least " ++ (show l)
-                 ++ " bytes (given " ++ (show x) ++ ")"
+    True -> error $ errShortKey l x
 
 
 splitMany :: (Int -> a -> (a, a)) -> [Int] -> a -> [a]
@@ -205,19 +223,19 @@ decryptCookie :: forall h c. (HashAlgorithm h, BlockCipher c) =>
 
 decryptCookie f h serverKey currentTime (expFormat, expSize) s = do
   let ivSize = blockSize (undefined::c)
-  let [iv' , expiration' , payload' , mac'] = splitMany BS.splitAt [
+  let [iv', expiration', payload', mac'] = splitMany BS.splitAt [
           ivSize
         , expSize
         , (BS.length s) - ivSize - expSize - hashDigestSize (undefined::h)
         ] s
 
-  when (mac' /= (sign h serverKey $ BS.concat [iv', expiration', payload'])) $ Left "MAC failed"
+  when (mac' /= (sign h serverKey $ BS.concat [iv', expiration', payload'])) $ Left errBadMAC
 
   let parsedTime = parseTimeM True defaultTimeLocale expFormat $ BS8.unpack expiration'
-  when (isNothing parsedTime) $ Left "Wrong time format"
+  when (isNothing parsedTime) $ Left errBadTimeFormat
 
   let expiration'' = fromJust parsedTime
-  when (currentTime >= expiration'') $ Left "Expired cookie"
+  when (currentTime >= expiration'') $ Left errExpired
 
   let key = mkProperKey
               (cipherKeySize (undefined :: c))
