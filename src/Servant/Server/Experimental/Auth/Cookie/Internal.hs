@@ -257,11 +257,11 @@ encryptSession (Settings {..}) session = do
   expiration' <- addUTCTime (fromIntegral maxAge) <$> getCurrentTime
   sk          <- getServerKey serverKey
 
-  -- TODO
   let payload' = runPut $ put session
   padding <- let
+        bs = blockSize $ unProxy cipher
         n = (BS8.length payload')
-        l = (16 - (n `mod` 16)) `mod` 16
+        l = (bs - (n `mod` bs)) `mod` bs
         in getRandomBytes randomSource l
 
   let cookie = Cookie  {

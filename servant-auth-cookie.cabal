@@ -73,6 +73,7 @@ test-suite tests
 
   build-depends: base == 4.9.*
                , bytestring
+               , cereal
                , cryptonite
                , deepseq
                , HUnit

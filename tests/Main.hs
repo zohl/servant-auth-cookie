@@ -1,10 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE RecordWildCards   #-}
 
 import Test.HUnit
 import Control.Monad
 import Data.Time.Clock           (getCurrentTime, addUTCTime)
+import Data.Serialize (Serialize)
+import GHC.Generics (Generic)
 import System.IO
 import System.Exit
 import Control.Concurrent (threadDelay)
@@ -25,6 +29,7 @@ tests = [
     TestLabel "RandomSource" testRandomSource
   , TestLabel "ServerKey"    testServerKey
   , TestLabel "Cookie"       testCookie
+  , TestLabel "Session"      testSession
   ]
 
 main :: IO ()
@@ -187,5 +192,84 @@ testCookie = TestList [
           ctrCombine ctrCombine
           mkCookie encryptionHook
 
-        assertBool "Unexpected result of decryption" (check res)
+        assertBool "Unexpected result of cookie decryption" (check res)
+
+
+data Tree a = Leaf a
+            | Node a [Tree a]
+  deriving (Eq, Generic)
+instance (Serialize a) => Serialize (Tree a)
+
+
+testData1 :: Tree Int
+testData1 = Node 0 [
+    Node 1 [Leaf 3, Leaf 4]
+  , Node 2 [Leaf 5, Leaf 6]
+  ]
+
+testData2 :: Tree String
+testData2 = Node "" [
+    Node "b" [
+        Leaf "ar"
+      , Leaf "az"
+      ]
+  , Leaf "corge"
+  , Node "g" [
+      Leaf "arply"
+    , Leaf "rault"
+    ]
+  , Leaf "foo"
+  , Node "qu" [
+        Leaf "x"
+      , Leaf "ux"
+      ]
+  ]
+
+
+testSession :: Test
+testSession = TestList $ [
+    testCustomSession defaultSettings testData1
+  , testCustomSession defaultSettings testData2
+
+  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
+        encryptAlgorithm = cbcEncrypt
+      , decryptAlgorithm = cbcDecrypt
+      , ..
+      }) testData1
+
+  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
+        encryptAlgorithm = cbcEncrypt
+      , decryptAlgorithm = cbcDecrypt
+      , ..
+      }) testData2
+
+  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
+        encryptAlgorithm = cfbEncrypt
+      , decryptAlgorithm = cfbDecrypt
+      , ..
+      }) testData1
+
+  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
+        encryptAlgorithm = cfbEncrypt
+      , decryptAlgorithm = cfbDecrypt
+      , ..
+      }) testData2
+
+  ] where
+      sessionId :: forall a. (Serialize a) => Settings -> a -> IO (Either String a)
+      sessionId settings session = do
+        rs <- mkRandomSource drgNew 100
+        sk <- mkServerKey 16 Nothing
+        let settings' = ($ settings) $ \(Settings {..}) -> Settings {
+            randomSource = rs
+          , serverKey = sk
+          , ..
+          }
+        encryptSession settings' session >>= decryptSession settings'
+
+      testCustomSession :: forall a. (Eq a, Serialize a) => Settings -> a -> Test
+      testCustomSession settings session = TestCase $ do
+        result <- either (const False) (\session' -> session == session')
+              <$> sessionId settings session
+        assertBool "Unexpected result of session decryption" result
 
