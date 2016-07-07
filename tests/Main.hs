@@ -146,9 +146,9 @@ testCookie = TestList [
         -> (BS8.ByteString -> IO BS8.ByteString)
         -> IO (Either String Cookie)
 
-      cipherId h _ encryptAlgo decryptAlgo mkCookie encryptionHook = do
+      cipherId h _ encryptAlgo decryptAlgo mkCookie' encryptionHook = do
 
-          cookie'     <- mkCookie
+          cookie'     <- mkCookie'
           key         <- mkServerKey 16 Nothing >>= getServerKey
           currentTime <- getCurrentTime
           msg         <- encryptionHook $ encryptCookie
@@ -185,12 +185,12 @@ testCookie = TestList [
       testCustomCookie :: IO Cookie -> (BS8.ByteString -> IO BS8.ByteString) ->
         (Either String Cookie -> Bool) -> Test
 
-      testCustomCookie mkCookie encryptionHook check = TestCase $ do
+      testCustomCookie mkCookie' encryptionHook check = TestCase $ do
         res <- cipherId
           (Proxy :: Proxy SHA256)
           (Proxy :: Proxy AES256)
           ctrCombine ctrCombine
-          mkCookie encryptionHook
+          mkCookie' encryptionHook
 
         assertBool "Unexpected result of cookie decryption" (check res)
 
