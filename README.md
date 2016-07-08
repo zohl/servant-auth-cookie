@@ -1,7 +1,6 @@
 #servant-auth-cookie
 
 ##Description
-
 Authentication via encrypted client-side cookies, inspired by
 [client-session](https://hackage.haskell.org/package/clientsession)
 library by Michael Snoyman and based on ideas of the paper
@@ -9,9 +8,15 @@ library by Michael Snoyman and based on ideas of the paper
 by Alex Liu et al.
 
 
-##Warning
-This library is under development.
+##Status
+The library is under development.
 
-At the moment here is already working example of cookie
-authentication, but further research and testing should be done.
-Some underlying mechanisms will be changed as well as the module API.
+API might change a little bit, but the core can be considered stable.
+The further changes will mostly reflect security and performance improvements.
+
+
+##Demo
+Type `cabal run example` to launch a local server with cookie
+authentication at 8080 port. It's a simple three-paged web site that
+will show the private page only if a correct cookie is presented. For
+valid accounts see `usersDB` list in `example/Main.hs`.

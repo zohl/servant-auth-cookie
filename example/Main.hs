@@ -176,8 +176,13 @@ loginPage firstTime = H.docTypeHtml $ do
   H.body $ do
     pageMenu
     H.form ! A.method "post" ! A.action "/login" $ do
-      H.input ! A.type_ "text"     ! A.name "username" >> H.br
-      H.input ! A.type_ "password" ! A.name "password" >> H.br
+      H.table $ do
+        H.tr $ do
+         H.td $ "username:"
+         H.td $ H.input ! A.type_ "text" ! A.name "username"
+        H.tr $ do
+         H.td $ "password:"
+         H.td $ H.input ! A.type_ "password" ! A.name "password"
       H.input ! A.type_ "submit"
     when (not firstTime) $ H.p "Incorrect username/password"
 
