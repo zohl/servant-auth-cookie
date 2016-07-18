@@ -4,7 +4,7 @@ synopsis:            Authentication via encrypted cookies
 description:         Authentication via encrypted client-side cookies,
                      inspired by client-session library by Michael Snoyman and based on
                      ideas of the paper "A Secure Cookie Protocol" by Alex Liu et al.
-license:             GPL-3
+license:             BSD3
 license-file:        LICENSE
 author:              Al Zohali
 maintainer:          Al Zohali <zohl@fmap.me>
