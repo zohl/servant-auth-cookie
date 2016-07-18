@@ -345,7 +345,7 @@ data Settings where
       -- ^ Scope of the cookie (corresponds to Path attribute).
 
     , errorMessage :: String
-      -- ^ Message to show in request when the cookie is invalid.
+      -- ^ Message to show in response when the cookie is invalid.
 
     , hideReason   :: Bool
       -- ^ Whether to print reason why the cookie was rejected
