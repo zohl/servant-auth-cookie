@@ -1,41 +1,40 @@
--- {-# LANGUAGE DataKinds                  #-}
--- {-# LANGUAGE FlexibleContexts           #-}
--- {-# LANGUAGE GADTs                      #-}
--- {-# LANGUAGE OverloadedStrings          #-}
--- {-# LANGUAGE TypeFamilies               #-}
--- {-# LANGUAGE ScopedTypeVariables        #-}
--- {-# LANGUAGE PartialTypeSignatures      #-}
--- {-# LANGUAGE Rank2Types                 #-}
-
-
 {-|
   Module:      Servant.Server.Experimental.Auth.Cookie
   Copyright:   (c) 2016 Al Zohali
-  License:     GPL3
+  License:     BSD3
   Maintainer:  Al Zohali <zohl@fmap.me>
   Stability:   experimental
-
 
   = Description
 
   Authentication via encrypted client-side cookies, inspired by
   client-session library by Michael Snoyman and based on ideas of the
-  paper "A Secure Cookie Protocol" by Alex Liu et al.
+  paper \"A Secure Cookie Protocol\" by Alex Liu et al.
 -}
 
-module Servant.Server.Experimental.Auth.Cookie (
-    RandomSource
-  , ServerKey
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE KindSignatures      #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE TypeFamilies        #-}
 
-  , CipherAlgorithm
+module Servant.Server.Experimental.Auth.Cookie
+  ( CipherAlgorithm
   , AuthCookieData
-  , Cookie(..)
+  , Cookie (..)
+  , AuthCookieException (..)
 
-  , Settings(..)
-  , defaultSettings
-
+  , RandomSource
   , mkRandomSource
+
+  , ServerKey
   , mkServerKey
+
+  , AuthCookieSettings (..)
 
   , encryptCookie
   , decryptCookie
@@ -49,6 +48,416 @@ module Servant.Server.Experimental.Auth.Cookie (
   , defaultAuthHandler
   ) where
 
-import Servant.Server.Experimental.Auth.Cookie.Internal
+import Blaze.ByteString.Builder (toByteString)
+import Control.Monad
+import Control.Monad.Catch (MonadThrow (..), Exception)
+import Control.Monad.Except
+import Crypto.Cipher.AES (AES256)
+import Crypto.Cipher.Types
+import Crypto.Error
+import Crypto.Hash (HashAlgorithm(..))
+import Crypto.Hash.Algorithms (SHA256)
+import Crypto.MAC.HMAC (HMAC)
+import Crypto.Random (drgNew, DRG(..))
+import Data.ByteString (ByteString)
+import Data.Default
+import Data.IORef
+import Data.Maybe (fromMaybe, isNothing)
+import Data.Monoid ((<>))
+import Data.Proxy
+import Data.Serialize (Serialize, put, get, runGet, runPut)
+import Data.Time
+import Data.Typeable
+import GHC.TypeLits (Symbol)
+import Network.HTTP.Types (hCookie)
+import Network.Wai (Request, requestHeaders)
+import Servant (addHeader)
+import Servant.API.Experimental.Auth (AuthProtect)
+import Servant.API.ResponseHeaders (AddHeader)
+import Servant.Server (err403)
+import Servant.Server.Experimental.Auth
+import Web.Cookie
+import qualified Crypto.MAC.HMAC        as H
+import qualified Data.ByteArray         as BA
+import qualified Data.ByteString        as BS
+import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Char8  as BSC8
 
+----------------------------------------------------------------------------
+-- General types
 
+-- | A type for encryption and decryption functions operating on 'ByteString's.
+type CipherAlgorithm c = c -> IV c -> ByteString -> ByteString
+
+-- | A type family that maps user-defined data to 'AuthServerData'.
+type family AuthCookieData
+type instance AuthServerData (AuthProtect "cookie-auth") = AuthCookieData
+
+-- | Cookie representation.
+data Cookie = Cookie
+  { cookieIV             :: ByteString -- ^ The initialization vector
+  , cookieExpirationTime :: UTCTime    -- ^ The cookie's expiration time
+  , cookiePayload        :: ByteString -- ^ The payload
+  }
+
+-- | The exception is thrown when something goes wrong with this package.
+
+data AuthCookieException
+  = CannotMakeIV ByteString
+    -- ^ Could not make 'IV' for block cipher.
+  | BadProperKey CryptoError
+    -- ^ Could not initialize a cipher context.
+  | TooShortProperKey Int Int
+    -- ^ The key is too short for current cipher algorithm. Arguments of
+    -- this constructor: minimal key length, actual key length.
+  | IncorrectMAC ByteString
+    -- ^ Thrown when Message Authentication Code (MAC) is not correct.
+  | CannotParseExpirationTime ByteString
+    -- ^ Thrown when expiration time cannot be parsed.
+  | CookieExpired UTCTime UTCTime
+    -- ^ Thrown when 'Cookie' has expired. Arguments of the constructor:
+    -- expiration time, actual time.
+  | SessionDeserializationFailed String
+    -- ^ This is thrown when 'runGet' or 'Base64.decode' blows up.
+  deriving (Eq, Show, Typeable)
+
+instance Exception AuthCookieException
+
+----------------------------------------------------------------------------
+-- Random source
+
+-- | A wrapper of self-resetting 'DRG' suitable for concurrent usage.
+data RandomSource d = RandomSource (IO d) Int (IORef (d, Int))
+
+-- | Constructor for 'RandomSource' value.
+mkRandomSource :: DRG d
+  => IO d              -- ^ How to get deterministic random generator
+  -> Int -- ^ Threshold (number of bytes to be generated before resetting)
+  -> IO (RandomSource d) -- ^ New 'RandomSource' value
+mkRandomSource mkDRG threshold =
+  RandomSource mkDRG threshold <$> ((,0) <$> mkDRG >>= newIORef)
+
+-- | Extract pseudo-random bytes from 'RandomSource'.
+getRandomBytes :: DRG d
+  => RandomSource d    -- ^ The source of random numbers
+  -> Int               -- ^ How many random bytes to generate
+  -> IO ByteString     -- ^ The generated bytes in form of a 'ByteString'
+getRandomBytes (RandomSource mkDRG threshold ref) n = do
+  freshDRG <- mkDRG
+  atomicModifyIORef' ref $ \(drg, bytes) ->
+    let (result, drg') = randomBytesGenerate n drg
+        bytes'         = bytes + n
+    in if bytes' >= threshold
+         then ((freshDRG, 0), result)
+         else ((drg', bytes'), result)
+
+----------------------------------------------------------------------------
+-- Server key
+
+-- | A wrapper of self-resetting 'ByteString' of random symbols suitable for
+-- concurrent usage.
+data ServerKey =
+  ServerKey Int (Maybe NominalDiffTime) (IORef (ByteString, UTCTime))
+
+-- | Constructor for 'ServerKey' value.
+mkServerKey
+  :: Int               -- ^ Size of the server key
+  -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
+  -> IO ServerKey      -- ^ New 'ServerKey'
+mkServerKey size maxAge =
+  ServerKey size maxAge <$> (mkServerKeyState size maxAge >>= newIORef)
+
+-- | An initializer of 'ServerKey' state.
+mkServerKeyState
+  :: Int               -- ^ Size of the server key
+  -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
+  -> IO (ByteString, UTCTime)
+mkServerKeyState size maxAge = do
+  key  <- fst . randomBytesGenerate size <$> drgNew
+  time <- addUTCTime (fromMaybe 0 maxAge) <$> getCurrentTime
+  return (key, time)
+
+-- | Extract value from 'ServerKey'.
+getServerKey
+  :: ServerKey         -- ^ The 'ServerKey'
+  -> IO ByteString     -- ^ Its random symbol
+getServerKey (ServerKey size maxAge ref) = do
+  currentTime <- getCurrentTime
+  freshServerKeyState <- mkServerKeyState size maxAge
+  atomicModifyIORef' ref $ \(key, expirationTime) ->
+    let expired =
+          if isNothing maxAge
+            then False
+            else currentTime > expirationTime
+    in if expired
+         then (freshServerKeyState,   key)
+         else ((key, expirationTime), key)
+
+----------------------------------------------------------------------------
+-- Settings
+
+-- | Options that determine authentication mechanisms. Use 'def' to get
+-- default value of this type.
+
+data AuthCookieSettings where
+  AuthCookieSettings :: (DRG d, HashAlgorithm h, BlockCipher c) =>
+    { acsSessionField :: ByteString
+      -- ^ Name of a cookie which stores session object
+    , acsCookieFlags :: [ByteString]
+      -- ^ Session cookie's flags
+    , acsMaxAge :: NominalDiffTime
+      -- ^ For how long the cookie will be valid (corresponds to “Max-Age”
+      -- attribute).
+    , acsExpirationFormat :: String
+      -- ^ Expiration format as in 'formatTime'.
+    , acsPath :: ByteString
+      -- ^ Scope of the cookie (corresponds to “Path” attribute).
+    , acsRandomSource :: IO (RandomSource d)
+      -- ^ Random source for 'IV'.
+    , acsServerKey :: IO ServerKey
+      -- ^ Server key to encrypt cookies.
+    , acsHashAlgorithm :: Proxy h
+      -- ^ Hash algorithm that will be used in 'hmac'.
+    , acsCipher :: Proxy c
+      -- ^ Symmetric cipher that will be used in encryption.
+    , acsEncryptAlgorithm :: CipherAlgorithm c
+      -- ^ Algorithm to encrypt cookies.
+    , acsDecryptAlgorithm :: CipherAlgorithm c
+      -- ^ Algorithm to decrypt cookies.
+    } -> AuthCookieSettings
+
+instance Default AuthCookieSettings where
+  def = AuthCookieSettings
+    { acsSessionField = "Session"
+    , acsCookieFlags  = ["HttpOnly", "Secure"]
+    , acsMaxAge       = fromIntegral (12 * 3600 * 1000000000000 :: Integer)
+    , acsExpirationFormat = "%0Y%m%d%H%M%S"
+    , acsPath         = "/"
+    , acsRandomSource = mkRandomSource drgNew 1000
+    , acsServerKey    = mkServerKey 16 Nothing
+    , acsHashAlgorithm = Proxy :: Proxy SHA256
+    , acsCipher       = Proxy :: Proxy AES256
+    , acsEncryptAlgorithm = ctrCombine
+    , acsDecryptAlgorithm = ctrCombine }
+
+----------------------------------------------------------------------------
+-- Encrypt/decrypt cookie
+
+-- | Encrypt given 'Cookie' with server key.
+--
+-- The function can throw the following exceptions (of type
+-- 'AuthCookieException'):
+--
+--     * 'TooShortProperKey'
+--     * 'CannotMakeIV'
+--     * 'BadProperKey'
+encryptCookie :: (MonadIO m, MonadThrow m)
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> Cookie            -- ^ The 'Cookie' to encrypt
+  -> m ByteString      -- ^ Encrypted 'Cookie' is form of 'ByteString'
+encryptCookie AuthCookieSettings {..} cookie = do
+  let iv = cookieIV cookie
+      expiration = BSC8.pack $ formatTime
+        defaultTimeLocale
+        acsExpirationFormat
+        (cookieExpirationTime cookie)
+  serverKey <- liftIO (acsServerKey >>= getServerKey)
+  key <- mkProperKey
+    (cipherKeySize $ unProxy acsCipher)
+    (sign acsHashAlgorithm serverKey $ iv <> expiration)
+  payload <- applyCipherAlgorithm acsEncryptAlgorithm
+    iv key (cookiePayload cookie)
+  let mac = sign acsHashAlgorithm serverKey
+        (BS.concat [iv, expiration, payload])
+  return . runPut $ do
+    put iv
+    put expiration
+    put payload
+    put mac
+
+-- | Decrypt a 'Cookie' from 'ByteString'.
+--
+-- The function can throw the following exceptions (of type
+-- 'AuthCookieException'):
+--
+--     * 'TooShortProperKey'
+--     * 'CannotMakeIV'
+--     * 'BadProperKey'
+--     * 'IncorrectMAC'
+--     * 'CannotParseExpirationTime'
+--     * 'CookieExpired'
+decryptCookie :: (MonadIO m, MonadThrow m)
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> ByteString        -- ^ The 'ByteString' to decrypt
+  -> m Cookie          -- ^ The decrypted 'Cookie'
+decryptCookie AuthCookieSettings {..} s = do
+  currentTime <- liftIO getCurrentTime
+  let ivSize  = blockSize (unProxy acsCipher)
+      expSize =
+        length (formatTime defaultTimeLocale acsExpirationFormat currentTime)
+      payloadSize = BS.length s - ivSize - expSize -
+        hashDigestSize (unProxy acsHashAlgorithm)
+      butMacSize = ivSize + expSize + payloadSize
+      (iv,            s0) = BS.splitAt ivSize s
+      (expirationRaw, s1) = BS.splitAt expSize s0
+      (payloadRaw,   mac) = BS.splitAt payloadSize s1
+  serverKey <- liftIO (acsServerKey >>= getServerKey)
+  when (mac /= sign acsHashAlgorithm serverKey (BS.take butMacSize s)) $
+    throwM (IncorrectMAC mac)
+  expirationTime <-
+    maybe (throwM $ CannotParseExpirationTime expirationRaw) return $
+      parseTimeM False defaultTimeLocale acsExpirationFormat
+        (BSC8.unpack expirationRaw)
+  when (currentTime >= expirationTime) $
+    throwM (CookieExpired expirationTime currentTime)
+  key <- mkProperKey
+    (cipherKeySize (unProxy acsCipher))
+    (sign acsHashAlgorithm serverKey $ BS.take (ivSize + expSize) s)
+  payload <- applyCipherAlgorithm acsDecryptAlgorithm iv key payloadRaw
+  return Cookie
+    { cookieIV             = iv
+    , cookieExpirationTime = expirationTime
+    , cookiePayload        = payload }
+
+----------------------------------------------------------------------------
+-- Encrypt/decrypt session
+
+-- | Pack session object into a cookie. The function can throw the same
+-- exceptions as 'encryptCookie'.
+encryptSession :: (MonadIO m, MonadThrow m, Serialize a)
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> a                 -- ^ Session value
+  -> m ByteString     -- ^ Serialized and encrypted session
+encryptSession acs@AuthCookieSettings {..} session = do
+  randomSource <- liftIO acsRandomSource
+  iv <- liftIO (getRandomBytes randomSource (blockSize $ unProxy acsCipher))
+  expirationTime <- addUTCTime acsMaxAge <$> liftIO getCurrentTime
+  let payload = runPut (put session)
+  padding <-
+    let bs = blockSize (unProxy acsCipher)
+        n  = BS.length payload
+        l  = (bs - (n `rem` bs)) `rem` bs
+    in liftIO (getRandomBytes randomSource l)
+  Base64.encode <$> encryptCookie acs (Cookie
+    { cookieIV             = iv
+    , cookieExpirationTime = expirationTime
+    , cookiePayload        = BS.concat [payload, padding] })
+
+-- | Unpack session value from a cookie. The function can throw the same
+-- exceptions as 'decryptCookie'.
+decryptSession :: (MonadIO m, MonadThrow m, Serialize a)
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> ByteString        -- ^ Cookie in binary form
+  -> m a               -- ^ Unpacked session value
+decryptSession acs@AuthCookieSettings {..} s =
+  let fromRight = either (throwM . SessionDeserializationFailed) return
+  in fromRight (Base64.decode s) >>=
+     decryptCookie acs           >>=
+     fromRight . runGet get . cookiePayload
+
+----------------------------------------------------------------------------
+-- Add/remove session
+
+-- | Add cookie header to response. The function can throw the same
+-- exceptions as 'encryptSession'.
+addSession :: ( MonadIO m
+              , MonadThrow m
+              , Serialize a
+              , AddHeader (e :: Symbol) ByteString s r )
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> a                 -- ^ The session value
+  -> s                 -- ^ Response to add session to
+  -> m r               -- ^ Response with the session added
+addSession acs@AuthCookieSettings {..} sessionData response = do
+  sessionBinary <- encryptSession acs sessionData
+  let cookies =
+        (acsSessionField, sessionBinary) :
+        ("Path",    acsPath) :
+        ("Max-Age", (BSC8.pack . show . nominalDiffTimeToSeconds) acsMaxAge) :
+        ((,"") <$> acsCookieFlags)
+  return $ addHeader (toByteString $ renderCookies cookies) response
+
+-- | Request handler that checks cookies. If 'Cookie' is just missing, you
+-- get 'Nothing', but if something is wrong with its format, 'getSession'
+-- can throw the same exceptions as 'decryptSession'.
+getSession :: (MonadIO m, MonadThrow m, Serialize a)
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> Request           -- ^ The request
+  -> m (Maybe a)       -- ^ The result
+getSession acs@AuthCookieSettings {..} req = do
+  let cookies = parseCookies <$> lookup hCookie (requestHeaders req)
+      sessionBinary = cookies >>= lookup acsSessionField
+  maybe (return Nothing) (fmap Just . decryptSession acs) sessionBinary
+
+----------------------------------------------------------------------------
+-- Default auth handler
+
+-- | Cookie authentication handler.
+defaultAuthHandler :: Serialize a
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> AuthHandler Request a -- ^
+defaultAuthHandler settings = mkAuthHandler $ \request -> do
+  msession <- liftIO (getSession settings request)
+  maybe (throwError err403) return msession
+
+----------------------------------------------------------------------------
+-- Helpers
+
+-- | Applies 'H.hmac' algorithm to given data.
+sign :: forall h. HashAlgorithm h
+  => Proxy h           -- ^ The hash algorithm to use
+  -> ByteString        -- ^
+  -> ByteString
+  -> ByteString
+sign Proxy key msg = BA.convert (H.hmac key msg :: HMAC h)
+{-# INLINE sign #-}
+
+-- | Truncates given 'ByteString' according to 'KeySizeSpecifier' or raises
+-- | error if the key is not long enough.
+mkProperKey :: MonadThrow m
+  => KeySizeSpecifier  -- ^ Key size specifier
+  -> ByteString        -- ^ The 'ByteString' to truncate
+  -> m ByteString      -- ^ The resulting 'ByteString'
+mkProperKey kss s = do
+  let klen = BS.length s
+      giveUp l = throwM (TooShortProperKey l klen)
+  plen <- case kss of
+    KeySizeRange l r ->
+      if klen < l
+        then giveUp l
+        else return (min klen r)
+    KeySizeEnum ls ->
+      case filter (<= klen) ls of
+        [] -> giveUp (minimum ls)
+        xs -> return (maximum xs)
+    KeySizeFixed l ->
+      if klen < l
+        then giveUp l
+        else return l
+  return (BS.take plen s)
+
+-- | Applies given encryption or decryption algorithm to given data.
+applyCipherAlgorithm :: forall c m. (BlockCipher c, MonadThrow m)
+  => CipherAlgorithm c -- ^ The cipher algorithm to apply
+  -> ByteString        -- ^ 'ByteString' from which to create 'IV'
+  -> ByteString        -- ^ Proper key
+  -> ByteString        -- ^ Cookie payload
+  -> m ByteString      -- ^ The resulting 'ByteString'
+applyCipherAlgorithm f ivRaw keyRaw msg = do
+  iv <- case makeIV ivRaw :: Maybe (IV c) of
+    Nothing -> throwM (CannotMakeIV ivRaw)
+    Just  x -> return x
+  key <- case cipherInit keyRaw :: CryptoFailable c of
+    CryptoFailed err -> throwM (BadProperKey err)
+    CryptoPassed   x -> return x
+  (return . BA.convert) (f key iv msg)
+
+-- | Return bottom of type provided as 'Proxy' tag.
+
+unProxy :: Proxy a -> a
+unProxy Proxy = undefined
+
+-- | Convert 'NominalDiffTime' to whole number of seconds.
+nominalDiffTimeToSeconds :: NominalDiffTime -> Int
+nominalDiffTimeToSeconds n = floor n `quot` 1000000000000
+{-# INLINE nominalDiffTimeToSeconds #-}
