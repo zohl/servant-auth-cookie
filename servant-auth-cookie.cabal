@@ -23,7 +23,7 @@ library
     Servant.Server.Experimental.Auth.Cookie
     Servant.Server.Experimental.Auth.Cookie.Internal
 
-  build-depends: base == 4.9.*
+  build-depends: base
                , base64-bytestring
                , bytestring
                , cereal
@@ -43,7 +43,7 @@ library
 executable example
   main-is:             Main.hs
   other-extensions:    DataKinds, TypeFamilies, DeriveGeneric, TypeOperators
-  build-depends: base == 4.9.*
+  build-depends: base
                , blaze-html
                , blaze-markup
                , bytestring
@@ -71,7 +71,7 @@ test-suite tests
 
   ghc-options: -Wall
 
-  build-depends: base == 4.9.*
+  build-depends: base
                , bytestring
                , cereal
                , cryptonite
