@@ -18,7 +18,7 @@
 
 
   = Description
-  Internals of `Servant.Server.Experimental.Auth.Cookie`.
+  Internals of the library.
 -}
 
 
@@ -89,7 +89,7 @@ errShortKey x y = "key size must be at least " ++ (show x) ++ " bytes (given " +
 errBadMAC :: String
 errBadMAC = "bad MAC"
 
--- | Error when the specified `expirationFormat` is not correct.
+-- | Error when the specified 'expirationFormat' is not correct.
 errBadTimeFormat :: String
 errBadTimeFormat = "bad time format"
 
@@ -98,11 +98,11 @@ errExpired :: String
 errExpired = "expired cookie"
 
 
--- | A generic type for `Crypto.Cipher.Types.BlockCipher` encryption and decryption functions.
+-- | A generic type for 'Crypto.Cipher.Types.BlockCipher' encryption and decryption functions.
 type GenericCipherAlgorithm c ba = (BlockCipher c, BA.ByteArray ba) =>
   c -> IV c -> ba -> ba
 
--- | A type for encryption and decryption functions operating on `Data.ByteString`s.
+-- | A type for encryption and decryption functions operating on 'ByteString's.
 type CipherAlgorithm c = GenericCipherAlgorithm c ByteString
 
 -- | A generic function to update IORef in a parallel thread.
@@ -112,26 +112,26 @@ refreshRef mkState ref = void $ forkIO refresh where
   refresh = mkState >>= atomicWriteIORef ref
 
 
--- | A wrapper of self-resetting `Crypto.Random.DRG` suitable for concurrent usage.
+-- | A wrapper of self-resetting 'Crypto.Random.DRG' suitable for concurrent usage.
 data RandomSource d where
   RandomSource :: (DRG d) => IO d -> Int -> IORef (d, Int) -> RandomSource d
 
--- | An intializator of `RandomSource` state.
+-- | An intializator of 'RandomSource' state.
 mkRandomSourceState :: (DRG d) => IO d -> IO (d, Int)
 mkRandomSourceState mkDRG = do
   drg <- mkDRG
   return (drg, 0)
 
--- | Constructor for `RandomSource` value.
+-- | Constructor for 'RandomSource' value.
 mkRandomSource :: forall d. (DRG d) => IO d -> Int -> IO (RandomSource d)
 mkRandomSource mkDRG threshold = (RandomSource mkDRG threshold)
                              <$> (mkRandomSourceState mkDRG >>= newIORef)
 
--- | An updater of `RandomSource` state.
+-- | An updater of 'RandomSource' state.
 refreshRandomSource :: forall d. RandomSource d -> IO ()
 refreshRandomSource (RandomSource mkDRG _ ref) = refreshRef (mkRandomSourceState mkDRG) ref
 
--- | Extracts pseudo-random bytes from `RandomSource`.
+-- | Extracts pseudo-random bytes from 'RandomSource'.
 getRandomBytes :: forall d. (DRG d) => RandomSource d -> Int -> IO ByteString
 getRandomBytes rs@(RandomSource _ threshold ref) n = do
     (result, bytes) <- atomicModifyIORef ref $ \(drg, bytes) -> let
@@ -143,26 +143,26 @@ getRandomBytes rs@(RandomSource _ threshold ref) n = do
     return $! result
 
 
--- | A wrapper of self-resetting `Data.ByteString` of random symbols suitable for concurrent usage.
+-- | A wrapper of self-resetting 'Data.ByteString' of random symbols suitable for concurrent usage.
 data ServerKey where
   ServerKey :: Int -> Maybe Int -> IORef (ByteString, UTCTime) -> ServerKey
 
--- | An initializator of `ServerKey` state.
+-- | An initializator of 'ServerKey' state.
 mkServerKeyState :: Int -> Maybe Int -> IO (ByteString, UTCTime)
 mkServerKeyState size maxAge = do
   key <- fst . randomBytesGenerate size <$> drgNew
   time <- addUTCTime (fromIntegral (fromMaybe 0 maxAge)) <$> getCurrentTime
   return (key, time)
 
--- | Constructor for `ServerKey` value.
+-- | Constructor for 'ServerKey' value.
 mkServerKey :: Int -> Maybe Int -> IO ServerKey
 mkServerKey size maxAge = (ServerKey size maxAge) <$> (mkServerKeyState size maxAge >>= newIORef)
 
--- | An updater of `ServerKey` value.
+-- | An updater of 'ServerKey' value.
 refreshServerKey :: ServerKey -> IO ()
 refreshServerKey (ServerKey size maxAge ref) = refreshRef (mkServerKeyState size maxAge) ref
 
--- | Extracts value from `ServerKey`.
+-- | Extracts value from 'ServerKey'.
 getServerKey :: ServerKey -> IO ByteString
 getServerKey sk@(ServerKey size maxAge ref) = do
   (key, time) <- readIORef ref
@@ -197,7 +197,7 @@ applyCipherAlgorithm f iv key msg = (BS.pack . BA.unpack) (f key' iv' msg) where
   key' = (fromMaybe (error errBadKey) (maybeCryptoError $ cipherInit key)) :: c
 
 
--- | Truncates given string according to `KeySizeSpecifier` or raises
+-- | Truncates given string according to 'KeySizeSpecifier' or raises
 -- | error if key is not long enough.
 mkProperKey :: KeySizeSpecifier -> ByteString -> ByteString
 mkProperKey kss s = BS8.take (getProperLength (BS8.length s) kss) s where
@@ -274,7 +274,7 @@ decryptCookie f h serverKey currentTime (expFormat, expSize) s = do
     }
 
 
--- | Transforms `Proxy` value to `undefined` of the underlying type.
+-- | Transforms 'Proxy' value to 'undefined' of the underlying type.
 unProxy :: forall a. Proxy a -> a
 unProxy _ = undefined
 
@@ -339,7 +339,7 @@ data Settings where
       -- (corresponds to Max-Age attribute).
 
     , expirationFormat :: (String, Int)
-      -- ^ Expiration format (string as in `Data.Time.Format.formatTime` and it's length).
+      -- ^ Expiration format (string as in 'Data.Time.Format.formatTime' and it's length).
 
     , path         :: ByteString
       -- ^ Scope of the cookie (corresponds to Path attribute).
@@ -372,7 +372,7 @@ data Settings where
     } -> Settings
 
 
--- | Defaut settings with ready-to-use values except `serverKey` and `randomSource`.
+-- | Defaut settings with ready-to-use values except 'serverKey' and 'randomSource'.
 --   These should be initializated manually as they require IO computations.
 defaultSettings :: Settings
 defaultSettings = Settings {
