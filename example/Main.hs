@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -9,6 +10,7 @@
 module Main (main) where
 
 import Control.Monad
+import Crypto.Random (drgNew)
 import Data.ByteString (ByteString)
 import Data.Default
 import Data.List (find)
@@ -24,6 +26,10 @@ import Text.Blaze.Html5 ((!), Markup)
 import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
+
+#if !MIN_VERSION_base(4,8,0)
+import Control.Applicative
+#endif
 
 data Account = Account
   { accUid       :: Int
@@ -69,8 +75,8 @@ type ExampleAPI =
        :> Post '[HTML] (Headers '[Header "set-cookie" ByteString] Markup)
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] Markup
 
-server :: AuthCookieSettings -> Server ExampleAPI
-server settings = serveHome
+server :: AuthCookieSettings -> RandomSource -> ServerKey -> Server ExampleAPI
+server settings rs sk = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
     :<|> servePrivate where
@@ -82,20 +88,25 @@ server settings = serveHome
     case userLookup lfUsername lfPassword usersDB of
       Nothing   -> return $ addHeader "" (loginPage False)
       Just uid -> addSession
-        settings
+        settings -- the settings
+        rs       -- random source
+        sk       -- server key
         (Account uid lfUsername lfPassword)
         (redirectPage "/private")
 
-  servePrivate (Account uid u p) = return  (privatePage uid u p)
+  servePrivate (Account uid u p) = return (privatePage uid u p)
 
-app :: AuthCookieSettings -> Application
-app settings = serveWithContext
+app :: AuthCookieSettings -> RandomSource -> ServerKey -> Application
+app settings rs sk = serveWithContext
   (Proxy :: Proxy ExampleAPI)
-  ((defaultAuthHandler settings :: AuthHandler Request Account) :. EmptyContext)
-  (server settings)
+  ((defaultAuthHandler settings sk :: AuthHandler Request Account) :. EmptyContext)
+  (server settings rs sk)
 
 main :: IO ()
-main = run 8080 (app def)
+main = do
+  rs <- mkRandomSource drgNew 1000
+  sk <- mkServerKey 16 Nothing
+  run 8080 (app def rs sk)
 
 pageMenu :: Markup
 pageMenu = do

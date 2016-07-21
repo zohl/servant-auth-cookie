@@ -1,275 +1,249 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE RecordWildCards   #-}
 
-import Test.HUnit
-import Control.Monad
-import Data.Time.Clock           (getCurrentTime, addUTCTime)
-import Data.Serialize (Serialize)
-import GHC.Generics (Generic)
-import System.IO
-import System.Exit
+module Main (main) where
+
 import Control.Concurrent (threadDelay)
-import Servant.Server.Experimental.Auth.Cookie.Internal
-import Servant (Proxy(..))
-
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BS8
-
-import Crypto.Random (drgNew)
-import Crypto.Hash (HashAlgorithm, SHA512, SHA384, SHA256)
-import Crypto.Cipher.Types (BlockCipher, ctrCombine, cbcEncrypt, cbcDecrypt, cfbEncrypt, cfbDecrypt)
 import Crypto.Cipher.AES (AES256, AES192, AES128)
+import Crypto.Cipher.Types
+import Crypto.Hash (HashAlgorithm, SHA512, SHA384, SHA256)
+import Crypto.Random (drgNew)
+import Data.ByteString (ByteString)
+import Data.Default
+import Data.Proxy
+import Data.Serialize (Serialize)
+import Data.Time
+import GHC.Generics (Generic)
+import Servant.Server.Experimental.Auth.Cookie
+import Test.Hspec
+import Test.QuickCheck
+import qualified Data.ByteString as BS
 
-
-tests :: [Test]
-tests = [
-    TestLabel "RandomSource" testRandomSource
-  , TestLabel "ServerKey"    testServerKey
-  , TestLabel "Cookie"       testCookie
-  , TestLabel "Session"      testSession
-  ]
+#if !MIN_VERSION_base(4,8,0)
+import Control.Applicative
+#endif
 
 main :: IO ()
-main = do
-  mapM_ (`hSetBuffering` LineBuffering) [stdout, stderr]
+main = hspec spec
 
-  Counts {cases, tried, errors, failures} <- runTestTT $ TestList tests
-  when (cases /= tried || errors /= 0 || failures /= 0) $ exitFailure
+spec :: Spec
+spec = do
+  describe "RandomSource" randomSourceSpec
+  describe "ServerKey"    serverKeySpec
+  describe "Cookie"       cookieSpec
+  describe "Session"      sessionSpec
 
-
-testRandomSource :: Test
-testRandomSource = TestList [
-    TestCase $ do
+randomSourceSpec :: Spec
+randomSourceSpec = do
+  context "when getRandomBytes is called consequently not exceeding threshould" $
+    it "does not produces the same result" $ do
       rs <- mkRandomSource drgNew 100
       s1 <- getRandomBytes rs 10
       s2 <- getRandomBytes rs 10
-      assertBool "A source produced the same ouptut" (s1 /= s2)
-
-  , TestCase $ do
+      s1 `shouldNotBe` s2
+  context "when two sources are created with the same parameters" $
+    it "they do not produce the same output" $ do
       rs1 <- mkRandomSource drgNew 100
       rs2 <- mkRandomSource drgNew 100
-      s1 <- getRandomBytes rs1 10
-      s2 <- getRandomBytes rs2 10
-      assertBool "Different sources produced the same ouptut" (s1 /= s2)
-
-  , TestCase $ do
+      s1  <- getRandomBytes rs1 10
+      s2  <- getRandomBytes rs2 10
+      s1 `shouldNotBe` s2
+  context "after resetting" $
+    it "does not produce the same result" $ do
       rs <- mkRandomSource drgNew 10
       s1 <- getRandomBytes rs 10
       s2 <- getRandomBytes rs 10
-      assertBool "Source after reset produced the same ouptut" (s1 /= s2)
-  ]
+      s1 `shouldNotBe` s2
 
-
-testServerKey :: Test
-testServerKey = TestList [
-    TestCase $ do
+serverKeySpec :: Spec
+serverKeySpec = do
+  context "when creating a new server key" $
+    it "has correct size" $ do
       let keySize = 64
       sk <- mkServerKey keySize Nothing
-      k <- getServerKey sk
-      assertBool "A key has incorrect size" (BS.length k /= (keySize `div` 8))
-
-  , TestCase $ do
-      sk <- mkServerKey 16 (Just 1)
-
-      -- TODO: This doesn't work in HUnit
-      -- k1 <- getServerKey sk
-      -- k2 <- threadDelay 2000000 >> getServerKey sk
-
-      -- This (sometimes) works, but I don't know what kind of magic happens here
-      getServerKey sk >>= (putStrLn . BS8.unpack)
-      threadDelay 2000000 >> getServerKey sk >>= (putStrLn . BS8.unpack)
-
+      k  <- getServerKey sk
+      BS.length k `shouldNotBe` (keySize `div` 8)
+  context "until expiration" $
+    it "returns the same key" $ do
+      sk <- mkServerKey 16 Nothing
+      k0 <- getServerKey sk
       k1 <- getServerKey sk
+      k0 `shouldBe` k1
+  context "when a key expires" $
+    it "is reset" $ do
+      sk <- mkServerKey 16 (Just $ fromIntegral (1 :: Integer))
+      k1 <- getServerKey sk
+      threadDelay 2000000
       k2 <- getServerKey sk
+      k1 `shouldNotBe` k2
 
-      assertBool "Expired key wasn't reset" (k1 /= k2)
-  ]
+cookieSpec :: Spec
+cookieSpec = do
+  context "when used with different encryption/decryption algorithms" $ do
+    it "works in CBC mode" $
+      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cbcEncrypt cbcDecrypt 64
+    it "works in CFB mode" $
+      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cfbEncrypt cfbDecrypt 64
+    it "works in CTR combine mode" $
+      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+  context "when used with different ciphers" $ do
+    it "works with AES256" $
+      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+    it "works with AES192" $
+      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES192) ctrCombine ctrCombine 100
+    it "works with AES128" $
+      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES128) ctrCombine ctrCombine 100
+  context "when used with different hash algorithms" $ do
+    it "works with SHA512" $
+      testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+    it "works with SHA384" $
+      testCipher (Proxy :: Proxy SHA384) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+    it "works with SHA256" $
+      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
+  context "when cookie is corrupted" $
+    it "throws" $
+      let selectIncorrectMAC (IncorrectMAC _) = True
+          selectIncorrectMAC _                = False
+      in testCustomCookie
+        (mkCookie 10 100)
+        (BS.drop 1)
+        selectIncorrectMAC
+  context "when cookie has expired" $
+    it "throws CookieExpired" $
+      let selectCookieExpired (CookieExpired _ _) = True
+          selectCookieExpired _                   = False
+      in testCustomCookie
+        (mkCookie 0 100)
+        id
+        selectCookieExpired
 
+testCipher :: (HashAlgorithm h, BlockCipher c)
+  => Proxy h           -- ^ Hash algorithm
+  -> Proxy c           -- ^ Cipher
+  -> CipherAlgorithm c -- ^ Encryption algorithm
+  -> CipherAlgorithm c -- ^ Decryption algorithm
+  -> Int               -- ^ Payload size
+  -> Expectation
+testCipher h c encryptAlgorithm decryptAlgorithm size = do
+  cookie <- mkCookie 10 size
+  result <- cipherId h c encryptAlgorithm decryptAlgorithm cookie id
+  cookieIV             result `shouldBe` cookieIV             cookie
+  diffUTCTime (cookieExpirationTime cookie) (cookieExpirationTime result)
+    `shouldSatisfy` (< fromIntegral (1 :: Integer))
+  cookiePayload        result `shouldBe` cookiePayload        cookie
 
-testCookie :: Test
-testCookie = TestList [
-  TestLabel "ciphers" $ TestList [
-      TestLabel "different algorithms" $ TestList [
-          testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cbcEncrypt cbcDecrypt 64
-        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cfbEncrypt cfbDecrypt 64
-        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-        ]
-    , TestLabel "different ciphers" $ TestList [
-          testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES192) ctrCombine ctrCombine 100
-        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES128) ctrCombine ctrCombine 100
-        ]
-    , TestLabel "different hashes" $ TestList [
-          testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-        , testCipher (Proxy :: Proxy SHA384) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-        , testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-        ]
-    , TestLabel "bad cases" $ TestList [
-          testCustomCookie
-            (mkCookie 10 100)
-            (return . BS8.drop 1)
-            (either (== errBadMAC) (const False))
+testCustomCookie
+  :: IO Cookie
+  -> (ByteString -> ByteString)
+  -> Selector AuthCookieException
+  -> Expectation
+testCustomCookie mkCookie' encryptionHook selector = do
+  cookie <- mkCookie'
+  cipherId
+    (Proxy :: Proxy SHA256)
+    (Proxy :: Proxy AES256)
+    ctrCombine ctrCombine
+    cookie
+    encryptionHook
+    `shouldThrow` selector
 
-        , testCustomCookie
-            (mkCookie 0 100)
-            (return)
-            (either (== errExpired) (const False))
-        ]
-    ]
-  ] where
-      expFormat :: (String, Int)
-      expFormat = expirationFormat defaultSettings
+mkCookie :: Int -> Int -> IO Cookie
+mkCookie dt size = do
+  rs         <- mkRandomSource drgNew 1000
+  iv         <- getRandomBytes rs 16
+  expiration <- addUTCTime (fromIntegral dt) <$> getCurrentTime
+  payload    <- getRandomBytes rs size
+  return Cookie
+    { cookieIV             = iv
+    , cookieExpirationTime = expiration
+    , cookiePayload        = payload }
 
-      mkCookie :: Int -> Int -> IO Cookie
-      mkCookie dt size = do
-        rs  <- mkRandomSource drgNew 1000
+cipherId :: (HashAlgorithm h, BlockCipher c)
+  => Proxy h           -- ^ Hash algorithm
+  -> Proxy c           -- ^ Cipher
+  -> CipherAlgorithm c -- ^ Encryption algorithm
+  -> CipherAlgorithm c -- ^ Decryption algorithm
+  -> Cookie            -- ^ 'Cookie' to encrypt
+  -> (BS.ByteString -> BS.ByteString) -- ^ Encryption hook
+  -> IO Cookie         -- ^ Restored 'Cookie'
+cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
+  sk     <- mkServerKey 16 Nothing
+  let sts =
+        case def of
+          AuthCookieSettings {..} -> AuthCookieSettings
+            { acsEncryptAlgorithm = encryptAlgorithm
+            , acsDecryptAlgorithm = decryptAlgorithm
+            , acsHashAlgorithm    = h
+            , acsCipher           = c
+            , .. }
+  encryptCookie sts sk cookie >>= decryptCookie sts sk . encryptionHook
 
-        iv'         <- getRandomBytes rs 16
-        expiration' <- addUTCTime (fromIntegral dt) <$> getCurrentTime
-        payload'    <- getRandomBytes rs size
+sessionSpec :: Spec
+sessionSpec = do
+  context "when session is encrypted and decrypted" $ do
+    it "is not distorted in any way (1)" $
+      property $ \session ->
+        let f = sessionHelper def :: Tree Int -> IO (Tree Int)
+        in f session `shouldReturn` session
+    it "is not distored in any way (2)" $
+      property $ \session ->
+        let f = sessionHelper def :: Tree String -> IO (Tree String)
+        in f session `shouldReturn` session
+  context "when session is encrypted and decrypted (CBC mode)" $ do
+    let sts =
+          case def of
+            AuthCookieSettings {..} -> AuthCookieSettings
+              { acsEncryptAlgorithm = cbcEncrypt
+              , acsDecryptAlgorithm = cbcDecrypt
+              , .. }
+    it "is not distorted in any way (1)" $
+      property $ \session ->
+        let f = sessionHelper sts :: Tree Int -> IO (Tree Int)
+        in f session `shouldReturn` session
+    it "is not distored in any way (2)" $
+      property $ \session ->
+        let f = sessionHelper sts :: Tree String -> IO (Tree String)
+        in f session `shouldReturn` session
+  context "when session is encrypted and decrypted (CFB mode)" $ do
+    let sts =
+          case def of
+            AuthCookieSettings {..} -> AuthCookieSettings
+              { acsEncryptAlgorithm = cfbEncrypt
+              , acsDecryptAlgorithm = cfbDecrypt
+              , .. }
+    it "is not distorted in any way (1)" $
+      property $ \session ->
+        let f = sessionHelper sts :: Tree Int -> IO (Tree Int)
+        in f session `shouldReturn` session
+    it "is not distored in any way (2)" $
+      property $ \session ->
+        let f = sessionHelper sts :: Tree String -> IO (Tree String)
+        in f session `shouldReturn` session
 
-        let cookie = Cookie {
-            iv         = iv'
-          , expiration = expiration'
-          , payload    = payload'
-          }
+sessionHelper :: Serialize a
+  => AuthCookieSettings
+  -> Tree a
+  -> IO (Tree a)
+sessionHelper settings x = do
+  rs <- mkRandomSource drgNew 1000
+  sk <- mkServerKey 16 Nothing
+  encryptSession settings rs sk x >>= decryptSession settings sk
 
-        return $ cookie
+data Tree a = Leaf a | Node a [Tree a] deriving (Eq, Show, Generic)
 
+instance Serialize a => Serialize (Tree a)
 
-      cipherId :: forall h c. (HashAlgorithm h, BlockCipher c) =>
-        Proxy h -> Proxy c -> CipherAlgorithm c -> CipherAlgorithm c
-        -> IO Cookie
-        -> (BS8.ByteString -> IO BS8.ByteString)
-        -> IO (Either String Cookie)
+instance Arbitrary a => Arbitrary (Tree a) where
+  arbitrary = sized arbitraryTree
 
-      cipherId h _ encryptAlgo decryptAlgo mkCookie' encryptionHook = do
-
-          cookie'     <- mkCookie'
-          key         <- mkServerKey 16 Nothing >>= getServerKey
-          currentTime <- getCurrentTime
-          msg         <- encryptionHook $ encryptCookie
-                           encryptAlgo
-                           h
-                           key
-                           cookie'
-                           (fst expFormat)
-
-          return $ decryptCookie
-                     decryptAlgo
-                     h
-                     key
-                     currentTime
-                     expFormat
-                     msg
-
-
-      testCipher :: (HashAlgorithm h, BlockCipher c) =>
-        Proxy h -> Proxy c -> CipherAlgorithm c -> CipherAlgorithm c -> Int -> Test
-
-      testCipher h c encryptionAlgorithm decryptionAlgorithm size = TestCase $ do
-        cookie <- mkCookie 10 size
-        res <- cipherId h c encryptionAlgorithm decryptionAlgorithm (return cookie) return
-
-        ($ res) $ either
-          assertFailure
-          (\cookie' -> assertEqual
-                         "Decrypted message differs from the original one"
-                         (payload cookie)
-                         (payload cookie'))
-
-
-      testCustomCookie :: IO Cookie -> (BS8.ByteString -> IO BS8.ByteString) ->
-        (Either String Cookie -> Bool) -> Test
-
-      testCustomCookie mkCookie' encryptionHook check = TestCase $ do
-        res <- cipherId
-          (Proxy :: Proxy SHA256)
-          (Proxy :: Proxy AES256)
-          ctrCombine ctrCombine
-          mkCookie' encryptionHook
-
-        assertBool "Unexpected result of cookie decryption" (check res)
-
-
-data Tree a = Leaf a
-            | Node a [Tree a]
-  deriving (Eq, Generic)
-instance (Serialize a) => Serialize (Tree a)
-
-
-testData1 :: Tree Int
-testData1 = Node 0 [
-    Node 1 [Leaf 3, Leaf 4]
-  , Node 2 [Leaf 5, Leaf 6]
-  ]
-
-testData2 :: Tree String
-testData2 = Node "" [
-    Node "b" [
-        Leaf "ar"
-      , Leaf "az"
-      ]
-  , Leaf "corge"
-  , Node "g" [
-      Leaf "arply"
-    , Leaf "rault"
-    ]
-  , Leaf "foo"
-  , Node "qu" [
-        Leaf "x"
-      , Leaf "ux"
-      ]
-  ]
-
-
-testSession :: Test
-testSession = TestList $ [
-    testCustomSession defaultSettings testData1
-  , testCustomSession defaultSettings testData2
-
-  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
-        encryptAlgorithm = cbcEncrypt
-      , decryptAlgorithm = cbcDecrypt
-      , ..
-      }) testData1
-
-  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
-        encryptAlgorithm = cbcEncrypt
-      , decryptAlgorithm = cbcDecrypt
-      , ..
-      }) testData2
-
-  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
-        encryptAlgorithm = cfbEncrypt
-      , decryptAlgorithm = cfbDecrypt
-      , ..
-      }) testData1
-
-  , testCustomSession (($ defaultSettings) $ \(Settings {..}) -> Settings {
-        encryptAlgorithm = cfbEncrypt
-      , decryptAlgorithm = cfbDecrypt
-      , ..
-      }) testData2
-
-  ] where
-      sessionId :: forall a. (Serialize a) => Settings -> a -> IO (Either String a)
-      sessionId settings session = do
-        rs <- mkRandomSource drgNew 100
-        sk <- mkServerKey 16 Nothing
-        let settings' = ($ settings) $ \(Settings {..}) -> Settings {
-            randomSource = rs
-          , serverKey = sk
-          , ..
-          }
-        encryptSession settings' session >>= decryptSession settings'
-
-      testCustomSession :: forall a. (Eq a, Serialize a) => Settings -> a -> Test
-      testCustomSession settings session = TestCase $ do
-        result <- either (const False) (\session' -> session == session')
-              <$> sessionId settings session
-        assertBool "Unexpected result of session decryption" result
-
+arbitraryTree :: Arbitrary a => Int -> Gen (Tree a)
+arbitraryTree 0 = Leaf <$> arbitrary
+arbitraryTree n = do
+  l <- choose (0, n `quot` 2)
+  oneof
+    [ Leaf <$> arbitrary
+    , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
