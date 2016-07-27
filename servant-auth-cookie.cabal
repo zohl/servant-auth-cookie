@@ -1,5 +1,5 @@
 name:                servant-auth-cookie
-version:             0.2.0.0
+version:             0.3.0.0
 synopsis:            Authentication via encrypted cookies
 description:         Authentication via encrypted client-side cookies,
                      inspired by client-session library by Michael Snoyman and based on
@@ -8,6 +8,7 @@ license:             BSD3
 license-file:        LICENSE
 author:              Al Zohali
 maintainer:          Al Zohali <zohl@fmap.me>
+copyright:           Al Zohali <zohl@fmap.me>, Mark Karpov <markkarpov@opmbx.org>
 category:            Web
 build-type:          Simple
 cabal-version:       >=1.10
