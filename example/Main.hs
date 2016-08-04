@@ -18,7 +18,9 @@ import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.Wai (Application, Request)
 import Network.Wai.Handler.Warp (run)
-import Servant
+import Servant (FromFormUrlEncoded(..), FormUrlEncoded, (:<|>)(..), (:>), ReqBody)
+import Servant (Post, Headers, Header, AuthProtect, Get, Server, Proxy)
+import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
 import Servant.Server.Experimental.Auth (AuthHandler)
 import Servant.Server.Experimental.Auth.Cookie

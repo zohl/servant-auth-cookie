@@ -1,16 +1,15 @@
 {-# LANGUAGE ExistentialQuantification #-}
 
-import Servant.Server.Experimental.Auth.Cookie.Internal
-
-import Crypto.Random (drgNew, DRG, getSystemDRG)
-import Data.ByteString (ByteString)
-import Control.Monad (when)
-
 import Criterion (Benchmark, bench, nfIO)
 import Criterion.Main (bgroup, defaultMain)
+import Crypto.Random (drgNew, DRG, getSystemDRG)
+import Control.Monad (when)
+import Data.ByteString (ByteString)
+import Servant.Server.Experimental.Auth.Cookie
 
 
 data DRGInit = forall d. (DRG d) => MkDRGInit (IO d)
+
 mkDRGInit :: (DRG d) => IO d -> DRGInit
 mkDRGInit = MkDRGInit
 
@@ -21,14 +20,14 @@ benchRandomSource = [ mkBenchmark name drg size | (name, drg) <- drgs, size <- s
   sizes :: [Int]
   sizes = [
       2000
-    -- , 4000
-    -- , 8000
+    , 4000
+    , 8000
     ]
 
   drgs :: [(String, DRGInit)]
   drgs = [
       ("ChaCha", mkDRGInit drgNew)
-    -- , ("System", mkDRGInit getSystemDRG)
+    , ("System", mkDRGInit getSystemDRG)
     ]
 
   mkBenchmark :: String -> DRGInit -> Int -> Benchmark
@@ -36,7 +35,7 @@ benchRandomSource = [ mkBenchmark name drg size | (name, drg) <- drgs, size <- s
     (name ++ "_" ++ (show size))
     (nfIO $ mkRandomSource drg size >>= drainRandomSource 16 1000)
 
-  drainRandomSource :: (DRG d) => Int -> Int -> RandomSource d -> IO ()
+  drainRandomSource :: Int -> Int -> RandomSource -> IO ()
   drainRandomSource chunkSize iterNum rs = step iterNum Nothing where
     step :: Int -> Maybe ByteString -> IO ()
     step 0 _  = return ()
