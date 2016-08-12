@@ -7,7 +7,11 @@ let
                        then pkgs.haskellPackages
                        else pkgs.haskell.packages.${compiler};
 
-  haskellPackages_ = haskellPackages.override { };
+  haskellPackages_ = haskellPackages.override {
+    overrides = self: super: {
+      cryptonite = self.callPackage ./cryptonite-0.19.nix {};
+    };
+  };
 
   drv = haskellPackages_.callPackage ./default.nix {};
 

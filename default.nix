@@ -6,13 +6,13 @@
 }:
 mkDerivation {
   pname = "servant-auth-cookie";
-  version = "0.3.0.2";
+  version = "0.3.0.3";
   src = ./.;
   isLibrary = true;
   isExecutable = true;
   libraryHaskellDepends = [
-    base base64-bytestring blaze-builder bytestring cereal cookie
-    cryptonite criterion data-default exceptions http-types memory mtl servant
+    base base64-bytestring blaze-builder bytestring cereal cookie 
+    cryptonite data-default exceptions http-types memory mtl servant
     servant-server time transformers wai
   ];
   executableHaskellDepends = [
@@ -21,7 +21,7 @@ mkDerivation {
     text wai warp
   ];
   testHaskellDepends = [
-    base bytestring cereal cryptonite data-default deepseq hspec
+    base bytestring cereal criterion cryptonite data-default deepseq hspec
     QuickCheck servant-server time
   ];
   description = "Authentication via encrypted cookies";
