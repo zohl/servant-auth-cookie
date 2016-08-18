@@ -47,6 +47,7 @@ module Servant.Server.Experimental.Auth.Cookie
   , decryptSession
 
   , addSession
+  , addSessionToErr
   , getSession
 
   , defaultAuthHandler
@@ -75,7 +76,7 @@ import Data.Typeable
 import GHC.TypeLits (Symbol)
 import Network.HTTP.Types (hCookie)
 import Network.Wai (Request, requestHeaders)
-import Servant (addHeader)
+import Servant (addHeader, ServantErr (..))
 import Servant.API.Experimental.Auth (AuthProtect)
 import Servant.API.ResponseHeaders (AddHeader)
 import Servant.Server (err403)
@@ -367,24 +368,37 @@ decryptSession acs@AuthCookieSettings {..} sk s =
 
 -- | Add cookie header to response. The function can throw the same
 -- exceptions as 'encryptSession'.
-addSession :: ( MonadIO m
-              , MonadThrow m
-              , Serialize a
-              , AddHeader (e :: Symbol) ByteString s r )
+addSession
+  :: ( MonadIO m
+     , MonadThrow m
+     , Serialize a
+     , AddHeader (e :: Symbol) ByteString s r )
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> RandomSource     -- ^ Random source to use
   -> ServerKey         -- ^ 'ServerKey' to use
   -> a                 -- ^ The session value
   -> s                 -- ^ Response to add session to
   -> m r               -- ^ Response with the session added
-addSession acs@AuthCookieSettings {..} rs sk sessionData response = do
-  sessionBinary <- encryptSession acs rs sk sessionData
-  let cookies =
-        (acsSessionField, sessionBinary) :
-        ("Path",    acsPath) :
-        ("Max-Age", (BSC8.pack . show . nominalDiffTimeToSeconds) acsMaxAge) :
-        ((,"") <$> acsCookieFlags)
-  return $ addHeader (toByteString $ renderCookies cookies) response
+addSession acs rs sk sessionData response = do
+  header <- renderSession acs rs sk sessionData
+  return (addHeader header response)
+
+-- | Add cookie session to error allowing to set cookie even if response is
+-- not 200.
+
+addSessionToErr
+  :: ( MonadIO m
+     , MonadThrow m
+     , Serialize a )
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> RandomSource      -- ^ Random source to use
+  -> ServerKey         -- ^ 'ServerKey' to use
+  -> a                 -- ^ The session value
+  -> ServantErr        -- ^ Servant error to add the cookie to
+  -> m ServantErr
+addSessionToErr acs rs sk sessionData err = do
+  header <- renderSession acs rs sk sessionData
+  return err { errHeaders = ("set-cookie", header) : errHeaders err }
 
 -- | Request handler that checks cookies. If 'Cookie' is just missing, you
 -- get 'Nothing', but if something is wrong with its format, 'getSession'
@@ -398,6 +412,26 @@ getSession acs@AuthCookieSettings {..} sk request = do
   let cookies = parseCookies <$> lookup hCookie (requestHeaders request)
       sessionBinary = cookies >>= lookup acsSessionField
   maybe (return Nothing) (liftM Just . decryptSession acs sk) sessionBinary
+
+-- | Render session cookie to 'ByteString'.
+renderSession
+  :: ( MonadIO m
+     , MonadThrow m
+     , Serialize a )
+  => AuthCookieSettings
+  -> RandomSource
+  -> ServerKey
+  -> a
+  -> m ByteString
+renderSession acs@AuthCookieSettings {..} rs sk sessionData = do
+  sessionBinary <- encryptSession acs rs sk sessionData
+  let cookies =
+        (acsSessionField, sessionBinary) :
+        ("Path",    acsPath) :
+        ("Max-Age", (BSC8.pack . show . n) acsMaxAge) :
+        ((,"") <$> acsCookieFlags)
+      n = floor :: NominalDiffTime -> Int
+  (return . toByteString . renderCookies) cookies
 
 ----------------------------------------------------------------------------
 -- Default auth handler
@@ -467,8 +501,3 @@ applyCipherAlgorithm f ivRaw keyRaw msg = do
 
 unProxy :: Proxy a -> a
 unProxy Proxy = undefined
-
--- | Convert 'NominalDiffTime' to whole number of seconds.
-nominalDiffTimeToSeconds :: NominalDiffTime -> Int
-nominalDiffTimeToSeconds n = floor n
-{-# INLINE nominalDiffTimeToSeconds #-}
