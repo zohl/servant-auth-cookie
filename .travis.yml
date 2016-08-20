@@ -43,4 +43,6 @@ script:
 #                  tests
 
 notifications:
-  email: false
+  email:
+    recipients:
+      - zohl@fmap.me

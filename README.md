@@ -1,5 +1,6 @@
 # servant-auth-cookie
-
+[![License BSD3](https://img.shields.io/badge/license-BSD3-brightgreen.svg)](https://tldrlegal.com/license/bsd-3-clause-license-(revised))
+[![Hackage](https://img.shields.io/hackage/v/servant-auth-cookie.svg?style=flat)](https://hackage.haskell.org/package/servant-auth-cookie)
 [![Build Status](https://travis-ci.org/zohl/servant-auth-cookie.svg?branch=master)](https://travis-ci.org/zohl/servant-auth-cookie)
 
 ## Description
