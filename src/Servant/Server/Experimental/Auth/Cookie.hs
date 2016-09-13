@@ -50,7 +50,10 @@ module Servant.Server.Experimental.Auth.Cookie
   , addSession
   , addSessionToErr
   , getSession
-
+  
+  -- exposed for testing purpose
+  , renderSession
+  
   , defaultAuthHandler
   ) where
 
