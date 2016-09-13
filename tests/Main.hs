@@ -7,24 +7,26 @@
 
 module Main (main) where
 
-import Control.Concurrent (threadDelay)
-import Crypto.Cipher.AES (AES256, AES192, AES128)
-import Crypto.Cipher.Types
-import Crypto.Hash (HashAlgorithm, SHA512, SHA384, SHA256)
-import Crypto.Random (drgNew)
-import Data.ByteString (ByteString)
-import Data.Default
-import Data.Proxy
-import Data.Serialize (Serialize)
-import Data.Time
-import GHC.Generics (Generic)
-import Servant.Server.Experimental.Auth.Cookie
-import Test.Hspec
-import Test.QuickCheck
-import qualified Data.ByteString as BS
+import           Control.Concurrent                      (threadDelay)
+import           Crypto.Cipher.AES                       (AES128, AES192,
+                                                          AES256)
+import           Crypto.Cipher.Types
+import           Crypto.Hash                             (HashAlgorithm, SHA256,
+                                                          SHA384, SHA512)
+import           Crypto.Random                           (drgNew)
+import           Data.ByteString                         (ByteString)
+import qualified Data.ByteString                         as BS
+import           Data.Default
+import           Data.Proxy
+import           Data.Serialize                          (Serialize)
+import           Data.Time
+import           GHC.Generics                            (Generic)
+import           Servant.Server.Experimental.Auth.Cookie
+import           Test.Hspec
+import           Test.QuickCheck
 
 #if !MIN_VERSION_base(4,8,0)
-import Control.Applicative
+import           Control.Applicative
 #endif
 
 main :: IO ()
@@ -67,6 +69,12 @@ serverKeySpec = do
       sk <- mkServerKey keySize Nothing
       k  <- getServerKey sk
       BS.length k `shouldNotBe` (keySize `div` 8)
+  context "when creating a new server key from data" $
+    it "has data as server key" $ do
+      let bytes = "0123456789"
+      sk <- mkServerKeyFromBytes bytes
+      k  <- getServerKey sk
+      k `shouldBe` bytes
   context "until expiration" $
     it "returns the same key" $ do
       sk <- mkServerKey 16 Nothing

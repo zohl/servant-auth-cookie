@@ -36,6 +36,7 @@ module Servant.Server.Experimental.Auth.Cookie
 
   , ServerKey
   , mkServerKey
+  , mkServerKeyFromBytes
   , getServerKey
 
   , AuthCookieSettings (..)
@@ -49,7 +50,10 @@ module Servant.Server.Experimental.Auth.Cookie
   , addSession
   , addSessionToErr
   , getSession
-
+  
+  -- exposed for testing purpose
+  , renderSession
+  
   , defaultAuthHandler
   ) where
 
@@ -176,6 +180,16 @@ mkServerKey :: MonadIO m
   -> m ServerKey       -- ^ New 'ServerKey'
 mkServerKey size maxAge =
   ServerKey size maxAge `liftM` liftIO (mkServerKeyState size maxAge >>= newIORef)
+
+-- | Constructor for 'ServerKey' value using predefined key.
+mkServerKeyFromBytes :: MonadIO m
+  => ByteString     -- ^ Predefined key
+  -> m ServerKey    -- ^ New 'ServerKey'
+mkServerKeyFromBytes bytes =
+  ServerKey (BS.length bytes) Nothing `liftM` liftIO (newIORef (bytes, timeOrigin)) 
+  where
+    -- we don't care about the time as the key never expires
+    timeOrigin = UTCTime (toEnum 0) 0
 
 -- | Extract value from 'ServerKey'.
 getServerKey :: MonadIO m
