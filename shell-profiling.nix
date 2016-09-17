@@ -13,7 +13,7 @@ let
         enableLibraryProfiling = true;
         enableExecutableProfiling = true;
       });
-      cryptonite = self.callPackage ./cryptonite-0.19.nix {};
+      cryptonite = self.callPackage ./cryptonite-0.20.nix {};
     };
   };
 
