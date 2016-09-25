@@ -4,12 +4,25 @@ sudo: false
 
 matrix:
   include:
-    - env: CABALVER=1.18 GHCVER=7.8.4
-      addons: {apt: {packages: [cabal-install-1.18,ghc-7.8.4], sources: [hvr-ghc]}}
-    - env: CABALVER=1.22 GHCVER=7.10.3
-      addons: {apt: {packages: [cabal-install-1.22,ghc-7.10.3], sources: [hvr-ghc]}}
+    # Unrestricted
     - env: CABALVER=1.24 GHCVER=8.0.1
       addons: {apt: {packages: [cabal-install-1.24,ghc-8.0.1], sources: [hvr-ghc]}}
+    - env: CABALVER=1.22 GHCVER=7.10.3
+      addons: {apt: {packages: [cabal-install-1.22,ghc-7.10.3], sources: [hvr-ghc]}}
+    - env: CABALVER=1.18 GHCVER=7.8.4
+      addons: {apt: {packages: [cabal-install-1.18,ghc-7.8.4], sources: [hvr-ghc]}}
+    # Constrained
+    - env: CABALVER=1.24 GHCVER=8.0.1 CABALCONFIG=servant=0.9
+      addons: {apt: {packages: [cabal-install-1.24,ghc-8.0.1], sources: [hvr-ghc]}}
+    - env: CABALVER=1.24 GHCVER=8.0.1 CABALCONFIG=servant=0.8
+      addons: {apt: {packages: [cabal-install-1.24,ghc-8.0.1], sources: [hvr-ghc]}}
+    - env: CABALVER=1.22 GHCVER=7.10.3 CABALCONFIG=servant-0.7
+      addons: {apt: {packages: [cabal-install-1.22,ghc-7.10.3], sources: [hvr-ghc]}}
+    - env: CABALVER=1.22 GHCVER=7.10.3 CABALCONFIG=servant-0.6
+      addons: {apt: {packages: [cabal-install-1.22,ghc-7.10.3], sources: [hvr-ghc]}}
+    - env: CABALVER=1.22 GHCVER=7.10.3 CABALCONFIG=servant-0.5
+      addons: {apt: {packages: [cabal-install-1.22,ghc-7.10.3], sources: [hvr-ghc]}}
+    # HEAD
     - env: CABALVER=head GHCVER=head
       addons: {apt: {packages: [cabal-install-head,ghc-head], sources: [hvr-ghc]}}
 
@@ -23,6 +36,7 @@ install:
  - cabal --version
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
  - travis_retry cabal update
+ - if [ ! -z "$CABALCONFIG" ]; then cp .travis/${CABALCONFIG}-cabal.config cabal.config; fi
  - cabal install --only-dependencies --enable-tests
 
 script:

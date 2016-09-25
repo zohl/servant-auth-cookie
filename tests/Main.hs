@@ -188,7 +188,7 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
             , acsHashAlgorithm    = h
             , acsCipher           = c
             , .. }
-  encryptCookie sts sk cookie >>= decryptCookie sts sk . encryptionHook
+  encryptCookie sts sk cookie >>= decryptCookie sts sk . fmap encryptionHook
 
 sessionSpec :: Spec
 sessionSpec = do

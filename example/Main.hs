@@ -9,29 +9,34 @@
 
 module Main (main) where
 
+import Prelude ()
+import Prelude.Compat
+
 import Control.Monad
 import Crypto.Random (drgNew)
-import Data.ByteString (ByteString)
 import Data.Default
 import Data.List (find)
 import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.Wai (Application, Request)
 import Network.Wai.Handler.Warp (run)
-import Servant (FromFormUrlEncoded(..), FormUrlEncoded, (:<|>)(..), (:>), ReqBody)
+#if MIN_VERSION_servant (0,9,0)
+import Web.FormUrlEncoded (FromForm(..), lookupUnique)
+#else
+import Servant (FromFormUrlEncoded(..))
+#endif
+import Servant ((:<|>)(..), (:>), ReqBody, FormUrlEncoded)
 import Servant (Post, Headers, Header, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
 import Servant.Server.Experimental.Auth (AuthHandler)
 import Servant.Server.Experimental.Auth.Cookie
 import Text.Blaze.Html5 ((!), Markup)
+import System.Exit (exitSuccess)
+import System.Environment (getArgs)
 import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
-
-#if !MIN_VERSION_base(4,8,0)
-import Control.Applicative
-#endif
 
 data Account = Account
   { accUid       :: Int
@@ -48,6 +53,15 @@ data LoginForm = LoginForm
   , lfPassword :: String
   } deriving (Eq, Show)
 
+#if MIN_VERSION_servant (0,9,0)
+instance FromForm LoginForm where
+  fromForm f = do
+    username <- fmap T.unpack $ lookupUnique "username" f
+    password <- fmap T.unpack $ lookupUnique "password" f
+    return LoginForm
+      { lfUsername = username
+      , lfPassword = password }
+#else
 instance FromFormUrlEncoded LoginForm where
   fromFormUrlEncoded d = do
     username <- case lookup "username" d of
@@ -59,6 +73,7 @@ instance FromFormUrlEncoded LoginForm where
     return LoginForm
       { lfUsername = username
       , lfPassword = password }
+#endif
 
 usersDB :: [Account]
 usersDB =
@@ -74,7 +89,7 @@ type ExampleAPI =
        Get '[HTML] Markup
   :<|> "login" :> Get '[HTML] Markup
   :<|> "login" :> ReqBody '[FormUrlEncoded] LoginForm
-       :> Post '[HTML] (Headers '[Header "set-cookie" ByteString] Markup)
+       :> Post '[HTML] (Headers '[Header "set-cookie" EncryptedSession] Markup)
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] Markup
 
 server :: AuthCookieSettings -> RandomSource -> ServerKey -> Server ExampleAPI
@@ -88,7 +103,7 @@ server settings rs sk = serveHome
 
   serveLoginPost LoginForm {..} =
     case userLookup lfUsername lfPassword usersDB of
-      Nothing   -> return $ addHeader "" (loginPage False)
+      Nothing   -> return $ addHeader emptyEncryptedSession (loginPage False)
       Just uid -> addSession
         settings -- the settings
         rs       -- random source
@@ -106,6 +121,10 @@ app settings rs sk = serveWithContext
 
 main :: IO ()
 main = do
+  args <- getArgs
+  when (args /= ["run"]) $ do
+      putStrLn "Use './example run' to run an example"
+      exitSuccess
   rs <- mkRandomSource drgNew 1000
   sk <- mkServerKey 16 Nothing
   run 8080 (app def rs sk)
