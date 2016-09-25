@@ -41,6 +41,9 @@ module Servant.Server.Experimental.Auth.Cookie
 
   , AuthCookieSettings (..)
 
+  , EncryptedSession (..)
+  , emptyEncryptedSession
+
   , encryptCookie
   , decryptCookie
 
@@ -96,6 +99,12 @@ import qualified Data.ByteString.Char8  as BSC8
 import Control.Applicative
 #endif
 
+#if MIN_VERSION_servant(0,9,0)
+import Servant (ToHttpApiData (..))
+#else
+import Data.ByteString.Conversion (ToByteString (..))
+#endif
+
 ----------------------------------------------------------------------------
 -- General types
 
@@ -112,6 +121,22 @@ data Cookie = Cookie
   , cookieExpirationTime :: UTCTime    -- ^ The cookie's expiration time
   , cookiePayload        :: ByteString -- ^ The payload
   } deriving (Eq, Show)
+
+-- | A newtype wrapper over 'ByteString'
+newtype EncryptedSession = EncryptedSession ByteString
+  deriving (Eq, Show, Typeable)
+
+emptyEncryptedSession :: EncryptedSession
+emptyEncryptedSession = EncryptedSession ""
+
+#if MIN_VERSION_servant(0,9,0)
+instance ToHttpApiData EncryptedSession where
+  toHeader (EncryptedSession s) = s
+  toUrlPiece = error "toUrlPiece @EncryptedSession: not implemented" 
+#else
+instance ToByteString EncryptedSession where
+  builder (EncryptedSession s) = builder s
+#endif
 
 -- | The exception is thrown when something goes wrong with this package.
 
@@ -386,7 +411,7 @@ addSession
   :: ( MonadIO m
      , MonadThrow m
      , Serialize a
-     , AddHeader (e :: Symbol) ByteString s r )
+     , AddHeader (e :: Symbol) EncryptedSession s r )
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> RandomSource     -- ^ Random source to use
   -> ServerKey         -- ^ 'ServerKey' to use
@@ -395,7 +420,7 @@ addSession
   -> m r               -- ^ Response with the session added
 addSession acs rs sk sessionData response = do
   header <- renderSession acs rs sk sessionData
-  return (addHeader header response)
+  return (addHeader (EncryptedSession header) response)
 
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
