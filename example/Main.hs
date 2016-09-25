@@ -9,6 +9,9 @@
 
 module Main (main) where
 
+import Prelude ()
+import Prelude.Compat
+
 import Control.Monad
 import Crypto.Random (drgNew)
 import Data.Default
@@ -34,10 +37,6 @@ import System.Environment (getArgs)
 import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
-
-#if !MIN_VERSION_base(4,8,0)
-import Control.Applicative
-#endif
 
 data Account = Account
   { accUid       :: Int
