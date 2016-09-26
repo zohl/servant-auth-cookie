@@ -127,6 +127,7 @@ data Cookie = Cookie
 newtype EncryptedSession = EncryptedSession ByteString
   deriving (Eq, Show, Typeable)
 
+-- | An empty 'EncryptedSession'
 emptyEncryptedSession :: EncryptedSession
 emptyEncryptedSession = EncryptedSession ""
 
