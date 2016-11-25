@@ -48,6 +48,7 @@ module Servant.Server.Experimental.Auth.Cookie
   , decryptSession
 
   , addSession
+  , removeSession
   , addSessionToErr
   , getSession
   
@@ -396,6 +397,28 @@ addSession
 addSession acs rs sk sessionData response = do
   header <- renderSession acs rs sk sessionData
   return (addHeader header response)
+
+-- |  "Remove" a session by invalidating the cookie.
+-- Cookie expiry date is set at 0  and content is wiped
+removeSession  :: ( MonadIO m
+                  , MonadThrow m
+                  , AddHeader (e :: Symbol) ByteString s r )
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> s                 -- ^ Response to return with  session removed
+  -> m r               -- ^ Response with the session "removed"
+removeSession acs@AuthCookieSettings{..} response = 
+  let invalidDate = BSC8.pack $ formatTime
+        defaultTimeLocale
+        acsExpirationFormat
+        timeOrigin
+      timeOrigin = UTCTime (toEnum 0) 0
+      cookies =
+        (acsSessionField, "") :
+        ("Path",    acsPath) :
+        ("Expires", invalidDate) :
+        ((,"") <$> acsCookieFlags)
+      header = (toByteString . renderCookies) cookies
+   in return (addHeader header response)
 
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
