@@ -4,8 +4,8 @@
 }:
 mkDerivation {
   pname = "cryptonite";
-  version = "0.19";
-  sha256 = "1rw5k34vpn4134yrzdhf0rsshsrkixfbv9ap18di2n00z2cw1shw";
+  version = "0.20";
+  sha256 = "0m63np0affci7ba9mrkvw2flzxn0s2mk930xldc4dwijw32gl6r6";
   libraryHaskellDepends = [
     base bytestring deepseq ghc-prim integer-gmp memory
   ];

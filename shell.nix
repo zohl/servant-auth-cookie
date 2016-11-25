@@ -9,7 +9,7 @@ let
 
   haskellPackages_ = haskellPackages.override {
     overrides = self: super: {
-      cryptonite = self.callPackage ./cryptonite-0.19.nix {};
+      cryptonite = self.callPackage ./cryptonite-0.20.nix {};
     };
   };
 
