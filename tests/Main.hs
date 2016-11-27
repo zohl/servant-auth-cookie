@@ -192,51 +192,42 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
 
 sessionSpec :: Spec
 sessionSpec = do
+  let treesOfInt = Proxy :: Proxy Int
+      treesOfString = Proxy :: Proxy String
+
   context "when session is encrypted and decrypted" $ do
     it "is not distorted in any way (1)" $
-      property $ \session ->
-        let f = sessionHelper def :: Tree Int -> IO (Tree Int)
-        in f session `shouldReturn` session
+      property $ \session -> encryptThenDecrypt treesOfInt def session `shouldReturn` session
     it "is not distored in any way (2)" $
-      property $ \session ->
-        let f = sessionHelper def :: Tree String -> IO (Tree String)
-        in f session `shouldReturn` session
+      property $ \session -> encryptThenDecrypt treesOfString def session `shouldReturn` session
   context "when session is encrypted and decrypted (CBC mode)" $ do
-    let sts =
-          case def of
-            AuthCookieSettings {..} -> AuthCookieSettings
-              { acsEncryptAlgorithm = cbcEncrypt
-              , acsDecryptAlgorithm = cbcDecrypt
-              , .. }
+    let sts = case def of
+                AuthCookieSettings{..} -> AuthCookieSettings
+                                          { acsEncryptAlgorithm = cbcEncrypt
+                                          , acsDecryptAlgorithm = cbcDecrypt
+                                          , .. }
     it "is not distorted in any way (1)" $
-      property $ \session ->
-        let f = sessionHelper sts :: Tree Int -> IO (Tree Int)
-        in f session `shouldReturn` session
+      property $ \session -> encryptThenDecrypt treesOfInt sts session `shouldReturn` session
     it "is not distored in any way (2)" $
-      property $ \session ->
-        let f = sessionHelper sts :: Tree String -> IO (Tree String)
-        in f session `shouldReturn` session
+      property $ \session -> encryptThenDecrypt treesOfString sts session `shouldReturn` session
   context "when session is encrypted and decrypted (CFB mode)" $ do
     let sts =
           case def of
             AuthCookieSettings {..} -> AuthCookieSettings
-              { acsEncryptAlgorithm = cfbEncrypt
-              , acsDecryptAlgorithm = cfbDecrypt
-              , .. }
+                                       { acsEncryptAlgorithm = cfbEncrypt
+                                       , acsDecryptAlgorithm = cfbDecrypt
+                                       , .. }
     it "is not distorted in any way (1)" $
-      property $ \session ->
-        let f = sessionHelper sts :: Tree Int -> IO (Tree Int)
-        in f session `shouldReturn` session
+      property $ \session -> encryptThenDecrypt treesOfInt sts session `shouldReturn` session
     it "is not distored in any way (2)" $
-      property $ \session ->
-        let f = sessionHelper sts :: Tree String -> IO (Tree String)
-        in f session `shouldReturn` session
+      property $ \session -> encryptThenDecrypt treesOfString sts session `shouldReturn` session
 
-sessionHelper :: Serialize a
-  => AuthCookieSettings
+encryptThenDecrypt :: Serialize a
+  => Proxy a
+  -> AuthCookieSettings
   -> Tree a
   -> IO (Tree a)
-sessionHelper settings x = do
+encryptThenDecrypt _ settings x = do
   rs <- mkRandomSource drgNew 1000
   sk <- mkServerKey 16 Nothing
   encryptSession settings rs sk x >>= decryptSession settings sk
