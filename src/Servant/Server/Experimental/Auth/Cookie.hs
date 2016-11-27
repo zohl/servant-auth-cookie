@@ -444,13 +444,12 @@ addSession acs rs sk sessionData response = do
 
 -- |  "Remove" a session by invalidating the cookie.
 -- Cookie expiry date is set at 0  and content is wiped
-removeSession  :: ( MonadIO m
-                  , MonadThrow m
-                  , AddHeader (e :: Symbol) ByteString s r )
+removeSession  :: ( Monad m,
+                    AddHeader (e :: Symbol) ByteString s r )
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> s                 -- ^ Response to return with  session removed
   -> m r               -- ^ Response with the session "removed"
-removeSession acs@AuthCookieSettings{..} response = 
+removeSession AuthCookieSettings{..} response = 
   let invalidDate = BSC8.pack $ formatTime
         defaultTimeLocale
         acsExpirationFormat
