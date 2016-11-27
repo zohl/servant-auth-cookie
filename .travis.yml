@@ -37,7 +37,7 @@ install:
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
  - travis_retry cabal update
  - if [ ! -z "$CABALCONFIG" ]; then cp .travis/${CABALCONFIG}-cabal.config cabal.config; fi
- - cabal install --only-dependencies --enable-tests
+ - cabal install --only-dependencies --enable-tests --max-backjumps=-1
 
 script:
  - case "$CABALVER" in
