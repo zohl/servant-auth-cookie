@@ -59,6 +59,7 @@ script:
 branches:
   only:
   - master
+  - lts
 
 notifications:
   email:
