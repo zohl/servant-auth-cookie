@@ -65,6 +65,7 @@ import Blaze.ByteString.Builder (toByteString)
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
+import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
 import Crypto.Cipher.AES (AES256)
 import Crypto.Cipher.Types
 import Crypto.Error
@@ -75,7 +76,7 @@ import Crypto.Random (drgNew, DRG(..))
 import Data.ByteString (ByteString)
 import Data.Default
 import Data.IORef
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize
@@ -216,7 +217,7 @@ getRandomBytes (RandomSource mkDRG threshold ref) n = do
 -- | A wrapper of self-resetting 'ByteString' of random symbols suitable for
 -- concurrent usage.
 data ServerKey =
-  ServerKey Int (Maybe NominalDiffTime) (IORef (ByteString, UTCTime))
+  ServerKey Int (Maybe NominalDiffTime) (IORef (ByteString, UTCTime)) (MVar ())
 
 -- | Constructor for 'ServerKey' value.
 mkServerKey :: MonadIO m
@@ -224,14 +225,18 @@ mkServerKey :: MonadIO m
   -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
   -> m ServerKey       -- ^ New 'ServerKey'
 mkServerKey size maxAge =
-  ServerKey size maxAge `liftM` liftIO (mkServerKeyState size maxAge >>= newIORef)
+  liftM2 (ServerKey size maxAge)
+    (liftIO (mkServerKeyState size maxAge >>= newIORef))
+    (liftIO (newMVar ()))
 
 -- | Constructor for 'ServerKey' value using predefined key.
 mkServerKeyFromBytes :: MonadIO m
   => ByteString     -- ^ Predefined key
   -> m ServerKey    -- ^ New 'ServerKey'
 mkServerKeyFromBytes bytes =
-  ServerKey (BS.length bytes) Nothing `liftM` liftIO (newIORef (bytes, timeOrigin))
+  liftM2 (ServerKey (BS.length bytes) Nothing)
+    (liftIO (newIORef (bytes, timeOrigin)))
+    (liftIO (newMVar ()))
   where
     -- we don't care about the time as the key never expires
     timeOrigin = UTCTime (toEnum 0) 0
@@ -240,24 +245,26 @@ mkServerKeyFromBytes bytes =
 getServerKey :: MonadIO m
   => ServerKey         -- ^ The 'ServerKey'
   -> m ByteString      -- ^ Its random symbol
-getServerKey (ServerKey size maxAge ref) = do
-  currentTime <- liftIO getCurrentTime
-  (key', expirationTime') <- mkServerKeyState size maxAge
-  liftIO . atomicModifyIORef' ref $ \(key, expirationTime) ->
-    let expired =
-          if isNothing maxAge
-            then False
-            else currentTime > expirationTime
-    in if expired
-         then ((key', expirationTime'), key')
-         else ((key,  expirationTime),  key)
+getServerKey (ServerKey size maxAge ref lock) = liftIO $ do
+  currentTime <- getCurrentTime
+  _ <- takeMVar lock
+  (key, expirationTime) <- readIORef ref
+  let expired = (isJust maxAge) && (currentTime > expirationTime)
+  key' <- if not expired
+    then return key
+    else do
+      refValue'@(key', _) <- mkServerKeyState size maxAge
+      writeIORef ref refValue'
+      return key'
+  putMVar lock ()
+  return key'
 
 -- | An initializer of 'ServerKey' state.
-mkServerKeyState :: MonadIO m
-  => Int               -- ^ Size of the server key
+mkServerKeyState
+  :: Int               -- ^ Size of the server key
   -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
-  -> m (ByteString, UTCTime)
-mkServerKeyState size maxAge = liftIO $ do
+  -> IO (ByteString, UTCTime)
+mkServerKeyState size maxAge = do
   key  <- fst . randomBytesGenerate size <$> drgNew
   time <- addUTCTime (fromMaybe 0 maxAge) <$> getCurrentTime
   return (key, time)
