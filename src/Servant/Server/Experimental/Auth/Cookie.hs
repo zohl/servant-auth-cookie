@@ -62,6 +62,7 @@ module Servant.Server.Experimental.Auth.Cookie
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
+import Control.Exception.Base (bracket)
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
@@ -76,7 +77,7 @@ import Crypto.Random (drgNew, DRG(..))
 import Data.ByteString (ByteString)
 import Data.Default
 import Data.IORef
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize
@@ -214,60 +215,82 @@ getRandomBytes (RandomSource mkDRG threshold ref) n = do
 ----------------------------------------------------------------------------
 -- Server key
 
+-- | A mutable state of ServerKey.
+data ServerKeyState = ServerKeyState
+  { sksBytes :: ByteString
+    -- ^ Current value of the key
+  , sksExpirationTime :: UTCTime
+    -- ^ When the key is expires
+  }
+
 -- | A wrapper of self-resetting 'ByteString' of random symbols suitable for
 -- concurrent usage.
-data ServerKey =
-  ServerKey Int (Maybe NominalDiffTime) (IORef (ByteString, UTCTime)) (MVar ())
+data ServerKey = ServerKey
+  { skSize :: Int
+    -- ^ Size of the key (in bytes)
+  , skMaxAge :: Maybe NominalDiffTime
+    -- ^ Expiration time ('Nothing' is enternity)
+  , skState :: IORef ServerKeyState
+    -- ^ Mutable state of the key
+  , skLock :: MVar ()
+    -- ^ Lock for the state. When empty, the state is not supposed to be
+    -- read/modified
+  }
 
 -- | Constructor for 'ServerKey' value.
 mkServerKey :: MonadIO m
   => Int               -- ^ Size of the server key
   -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
   -> m ServerKey       -- ^ New 'ServerKey'
-mkServerKey size maxAge =
-  liftM2 (ServerKey size maxAge)
-    (liftIO (mkServerKeyState size maxAge >>= newIORef))
-    (liftIO (newMVar ()))
+mkServerKey skSize skMaxAge = liftIO $ do
+  skState <- mkServerKeyState skSize skMaxAge >>= newIORef
+  skLock <- newMVar ()
+  return ServerKey {..}
 
 -- | Constructor for 'ServerKey' value using predefined key.
 mkServerKeyFromBytes :: MonadIO m
   => ByteString     -- ^ Predefined key
   -> m ServerKey    -- ^ New 'ServerKey'
-mkServerKeyFromBytes bytes =
-  liftM2 (ServerKey (BS.length bytes) Nothing)
-    (liftIO (newIORef (bytes, timeOrigin)))
-    (liftIO (newMVar ()))
-  where
-    -- we don't care about the time as the key never expires
-    timeOrigin = UTCTime (toEnum 0) 0
+mkServerKeyFromBytes bytes = liftIO $ do
+  let skSize = BS.length bytes
+  let skMaxAge = Nothing
+  skState <- newIORef ServerKeyState
+    { sksBytes = bytes
+    , sksExpirationTime = UTCTime (toEnum 0) 0
+      -- we don't care about the time as the key never expires
+    }
+  skLock <- newMVar ()
+  return ServerKey {..}
 
 -- | Extract value from 'ServerKey'.
 getServerKey :: MonadIO m
   => ServerKey         -- ^ The 'ServerKey'
   -> m ByteString      -- ^ Its random symbol
-getServerKey (ServerKey size maxAge ref lock) = liftIO $ do
-  currentTime <- getCurrentTime
-  _ <- takeMVar lock
-  (key, expirationTime) <- readIORef ref
-  let expired = (isJust maxAge) && (currentTime > expirationTime)
-  key' <- if not expired
-    then return key
-    else do
-      refValue'@(key', _) <- mkServerKeyState size maxAge
-      writeIORef ref refValue'
-      return key'
-  putMVar lock ()
-  return key'
+getServerKey ServerKey {..} = liftIO $ maybe
+  (sksBytes <$> readIORef skState)
+  (\_ -> do
+    currentTime <- getCurrentTime
+    bracket (takeMVar skLock) (putMVar skLock) $ \_ -> do
+      curState <- readIORef skState
+      let expired = currentTime > (sksExpirationTime curState)
+      resState <- if not expired
+        then return curState
+        else do
+          newState <- mkServerKeyState skSize skMaxAge
+          writeIORef skState newState
+          return newState
+      return (sksBytes resState))
+  skMaxAge
 
 -- | An initializer of 'ServerKey' state.
 mkServerKeyState
   :: Int               -- ^ Size of the server key
   -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
-  -> IO (ByteString, UTCTime)
-mkServerKeyState size maxAge = do
-  key  <- fst . randomBytesGenerate size <$> drgNew
-  time <- addUTCTime (fromMaybe 0 maxAge) <$> getCurrentTime
-  return (key, time)
+  -> IO ServerKeyState
+mkServerKeyState skSize skMaxAge = do
+  sksBytes  <- fst . randomBytesGenerate skSize <$> drgNew
+  sksExpirationTime <- addUTCTime (fromMaybe 0 skMaxAge) <$> getCurrentTime
+  return ServerKeyState {..}
 
 ----------------------------------------------------------------------------
 -- Settings
