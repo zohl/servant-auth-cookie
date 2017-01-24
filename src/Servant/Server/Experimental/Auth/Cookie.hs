@@ -62,11 +62,10 @@ module Servant.Server.Experimental.Auth.Cookie
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
-import Control.Exception.Base (bracket)
+import Control.Arrow ((&&&))
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
-import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
 import Crypto.Cipher.AES (AES256)
 import Crypto.Cipher.Types
 import Crypto.Error
@@ -232,9 +231,6 @@ data ServerKey = ServerKey
     -- ^ Expiration time ('Nothing' is enternity)
   , skState :: IORef ServerKeyState
     -- ^ Mutable state of the key
-  , skLock :: MVar ()
-    -- ^ Lock for the state. When empty, the state is not supposed to be
-    -- read/modified
   }
 
 -- | Constructor for 'ServerKey' value.
@@ -244,7 +240,6 @@ mkServerKey :: MonadIO m
   -> m ServerKey       -- ^ New 'ServerKey'
 mkServerKey skSize skMaxAge = liftIO $ do
   skState <- mkServerKeyState skSize skMaxAge >>= newIORef
-  skLock <- newMVar ()
   return ServerKey {..}
 
 -- | Constructor for 'ServerKey' value using predefined key.
@@ -259,7 +254,6 @@ mkServerKeyFromBytes bytes = liftIO $ do
     , sksExpirationTime = UTCTime (toEnum 0) 0
       -- we don't care about the time as the key never expires
     }
-  skLock <- newMVar ()
   return ServerKey {..}
 
 -- | Extract value from 'ServerKey'.
@@ -270,16 +264,13 @@ getServerKey ServerKey {..} = liftIO $ maybe
   (sksBytes <$> readIORef skState)
   (\_ -> do
     currentTime <- getCurrentTime
-    bracket (takeMVar skLock) (putMVar skLock) $ \_ -> do
-      curState <- readIORef skState
-      let expired = currentTime > (sksExpirationTime curState)
-      resState <- if not expired
-        then return curState
-        else do
-          newState <- mkServerKeyState skSize skMaxAge
-          writeIORef skState newState
-          return newState
-      return (sksBytes resState))
+    state <- readIORef skState
+    case (currentTime > sksExpirationTime state) of
+      False -> return $ sksBytes state
+      True  -> do
+        state' <- mkServerKeyState skSize skMaxAge
+        atomicModifyIORef' skState $ \state'' -> id &&& sksBytes $
+          if (sksBytes state == sksBytes state'') then state' else state'')
   skMaxAge
 
 -- | An initializer of 'ServerKey' state.
