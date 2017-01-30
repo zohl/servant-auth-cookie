@@ -1,5 +1,5 @@
 name:                servant-auth-cookie
-version:             0.4.2.1
+version:             0.4.3
 synopsis:            Authentication via encrypted cookies
 description:         Authentication via encrypted client-side cookies,
                      inspired by client-session library by Michael Snoyman and based on
@@ -103,7 +103,7 @@ executable example
   if flag(build-examples)
     build-depends: base           >= 4.7  && < 5.0
                  , base-compat    >= 0.9.1 && <0.10
-                 , blaze-html     >= 0.8  && < 0.9
+                 , blaze-html     >= 0.8  && <= 0.9.0.1
                  , blaze-markup   >= 0.7  && < 0.8
                  , bytestring
                  , cereal         >= 0.5  && < 0.6
