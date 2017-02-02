@@ -6,7 +6,7 @@
 }:
 mkDerivation {
   pname = "servant-auth-cookie";
-  version = "0.4.3.1";
+  version = "0.4.3.2";
   src = ./.;
   isLibrary = true;
   isExecutable = true;
