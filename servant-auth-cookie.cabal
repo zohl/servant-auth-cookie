@@ -13,6 +13,9 @@ category:            Web
 build-type:          Simple
 cabal-version:       >=1.10
 
+extra-source-files:
+  CHANGELOG.md
+
 source-repository head
   type:     git
   location: https://github.com/zohl/servant-auth-cookie.git
