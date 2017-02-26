@@ -1,8 +1,14 @@
 # Change Log
 
 ## [Unreleased]
+
+
+## [0.4.3.3]
 ### Added
 - Changelog.
+
+### Changed
+- Fixed dependencies' bounds.
 
 ## [0.4.3.2] - 2016-02-02
 ### Changed
@@ -29,6 +35,7 @@
 ### Added
 - Support for `servant-0.9`.
 - Tags for bytestrings.
+
 ### Changed
 - Switched to `base-compat`.
 
@@ -61,6 +68,7 @@
   - ...and many others.
 - Tests
 - Documentation
+
 ### Changed
 - `RandomKey` and `ServerKey` initialization (without `unsafePerformIO`).
 
@@ -73,7 +81,8 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.4.3.2...HEAD
+[HEAD]:    ../../compare/v0.4.3.3...HEAD
+[0.4.3.3]: ../../compare/v0.4.3.2...v0.4.3.3
 [0.4.3.2]: ../../compare/v0.4.3.1...v0.4.3.2
 [0.4.3.1]: ../../compare/v0.4.3...v0.4.3.1
 [0.4.3]:   ../../compare/v0.4.2.1...v0.4.3
