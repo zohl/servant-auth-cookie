@@ -141,6 +141,47 @@ executable example
   default-language:    Haskell2010
 
 
+test-suite example-tests
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: example
+  main-is:        Test.hs
+  if flag(dev)
+    ghc-options:      -Wall -Werror
+  else
+    ghc-options:      -O2 -Wall
+
+  if flag(build-examples)
+    build-depends: base           >= 4.7  && < 5.0
+                 , base-compat    >= 0.9.1 && <0.10
+                 , blaze-markup
+                 , blaze-html     >= 0.8  && < 0.10
+                 , bytestring
+                 , cereal         >= 0.5  && < 0.6
+                 , exceptions
+                 , cryptonite     >= 0.14 && < 0.23
+                 , data-default
+                 , deepseq        >= 1.3  && < 1.5
+                 , http-media
+                 , http-types
+                 , hspec          >= 2.0  && < 3.0
+                 , hspec-wai
+                 , QuickCheck     >= 2.4  && < 3.0
+                 , servant-auth-cookie
+                 , servant-blaze  >= 0.5  && < 0.10
+                 , servant-server >= 0.5  && < 0.11
+                 , text
+                 , time           >= 1.5  && < 1.8
+                 , transformers   >= 0.4   && < 0.6
+                 , wai
+                 , wai-extra
+
+    if !impl(ghc >= 7.8)
+      build-depends:    tagged    == 0.8.*
+  else
+    buildable: False
+
+  default-language:    Haskell2010
+
 
 benchmark bench
   type:             exitcode-stdio-1.0

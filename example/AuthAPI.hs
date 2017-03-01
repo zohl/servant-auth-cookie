@@ -7,7 +7,14 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 
-module AuthAPI where
+module AuthAPI (
+  ExampleAPI
+, app
+, authSettings
+, LoginForm(..)
+, homePage
+, loginPage
+) where
 
 import Prelude ()
 import Prelude.Compat
@@ -22,9 +29,9 @@ import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.Wai (Application, Request)
 #if MIN_VERSION_servant (0,9,0)
-import Web.FormUrlEncoded (FromForm(..), lookupUnique)
+import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
 #else
-import Servant (FromFormUrlEncoded(..), ServantErr, throwError, err403, errBody)
+import Servant (FromFormUrlEncoded(..), ToFormUrlEncoded(..), toQueryParam, ServantErr, throwError, err403, errBody)
 #endif
 import Servant ((:<|>)(..), (:>), ReqBody, FormUrlEncoded)
 import Servant (Post, Headers, Header, AuthProtect, Get, Server, Proxy)
@@ -74,6 +81,7 @@ data LoginForm = LoginForm
   , lfPassword :: String
   } deriving (Eq, Show)
 
+
 #if MIN_VERSION_servant (0,9,0)
 instance FromForm LoginForm where
   fromForm f = do
@@ -82,6 +90,12 @@ instance FromForm LoginForm where
     return LoginForm
       { lfUsername = username
       , lfPassword = password }
+
+instance ToForm LoginForm where
+  toForm LoginForm {..} =
+    [ ("username", toQueryParam lfUsername)
+    , ("password", toQueryParam lfPassword) ]
+
 #else
 instance FromFormUrlEncoded LoginForm where
   fromFormUrlEncoded d = do
@@ -94,6 +108,11 @@ instance FromFormUrlEncoded LoginForm where
     return LoginForm
       { lfUsername = username
       , lfPassword = password }
+
+instance ToFormUrlEncoded LoginForm where
+  toFormUrlEncoded LoginForm {..} =
+    [ ("username", toQueryParam lfUsername)
+    , ("password", toQueryParam lfPassword) ]
 #endif
 
 
@@ -143,14 +162,6 @@ authHandler acs sk = mkAuthHandler $ \request ->
   where
     handleEx :: AuthCookieException -> ExceptT ServantErr IO (Maybe Account)
     handleEx ex = throwError err403 {errBody = fromStrict . BSC8.pack $ show ex}
-
-  -- msession <- catch
-  --   (getSession acs sk request) $ \(ex :: AuthCookieException) ->
-  --   throwError err403 {errBody = fromStrict . BSC8.pack $ show ex}
-  -- maybe
-  --   (throwError err403 {errBody = "User doesn't exist"})
-  --   (return)
-  --   msession
 
 -- | Authentication settings.
 -- Note that we do not use "Secure" flag here. Cookies with this flag will be

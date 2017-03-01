@@ -1,28 +1,21 @@
-{ mkDerivation, base, base64-bytestring, blaze-builder, blaze-html
-, blaze-markup, bytestring, cereal, cookie, criterion, cryptonite
-, data-default, deepseq, exceptions, hspec, http-media, http-types
-, memory, mtl, QuickCheck, servant, servant-blaze, servant-server
-, stdenv, text, time, transformers, wai, warp
+{ mkDerivation, base, base64-bytestring, blaze-builder, bytestring
+, cereal, cookie, cryptonite, data-default, deepseq, exceptions
+, hspec, http-api-data, http-types, memory, mtl, QuickCheck
+, servant, servant-server, stdenv, tagged, time, transformers, wai
+, hspec-wai, servant-blaze
 }:
 mkDerivation {
   pname = "servant-auth-cookie";
   version = "0.4.3.3";
   src = ./.;
-  isLibrary = true;
-  isExecutable = true;
   libraryHaskellDepends = [
-    base base64-bytestring blaze-builder bytestring cereal cookie 
-    cryptonite data-default exceptions http-types memory mtl servant
-    servant-server time transformers wai
-  ];
-  executableHaskellDepends = [
-    base blaze-html blaze-markup bytestring cereal cryptonite
-    data-default http-media mtl servant servant-blaze servant-server
-    text wai warp
+    base base64-bytestring blaze-builder bytestring cereal cookie
+    cryptonite data-default exceptions http-api-data http-types memory
+    mtl servant servant-server tagged time transformers wai
   ];
   testHaskellDepends = [
-    base bytestring cereal criterion cryptonite data-default deepseq hspec
-    QuickCheck servant-server time
+    base bytestring cereal cryptonite data-default deepseq hspec
+    QuickCheck servant-server time hspec-wai servant-blaze
   ];
   description = "Authentication via encrypted cookies";
   license = stdenv.lib.licenses.bsd3;
