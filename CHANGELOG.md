@@ -1,7 +1,8 @@
 # Change Log
 
 ## [Unreleased]
-
+### Changed
+- Fixed constraint for `removeSession`.
 
 ## [0.4.3.3]
 ### Added

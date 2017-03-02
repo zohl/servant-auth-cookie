@@ -466,7 +466,7 @@ addSession acs rs sk sessionData response = do
 -- |  "Remove" a session by invalidating the cookie.
 -- Cookie expiry date is set at 0  and content is wiped
 removeSession  :: ( Monad m,
-                    AddHeader (e :: Symbol) ByteString s r )
+                    AddHeader (e :: Symbol) EncryptedSession s r )
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> s                 -- ^ Response to return with  session removed
   -> m r               -- ^ Response with the session "removed"
@@ -482,7 +482,7 @@ removeSession AuthCookieSettings{..} response =
         ("Expires", invalidDate) :
         ((,"") <$> acsCookieFlags)
       header = (toByteString . renderCookies) cookies
-   in return (addHeader header response)
+   in return (addHeader (EncryptedSession header) response)
 
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
