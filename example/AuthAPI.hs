@@ -10,6 +10,7 @@
 
 module AuthAPI (
   ExampleAPI
+, Account(..)
 , app
 , authSettings
 , LoginForm(..)
@@ -156,7 +157,7 @@ server settings rs sk = serveHome
 authHandler :: AuthCookieSettings -> ServerKey -> AuthHandler Request Account
 authHandler acs sk = mkAuthHandler $ \request ->
   (getSession acs sk request) `catch` handleEx >>= maybe
-    (throwError err403 {errBody = "User doesn't exist"})
+    (throwError err403 {errBody = "No cookies"})
     (return)
   where
     handleEx :: AuthCookieException -> Handler (Maybe Account)
