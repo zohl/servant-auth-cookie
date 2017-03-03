@@ -1,6 +1,9 @@
 # Change Log
 
 ## [Unreleased]
+### Added
+- Tests for the example.
+
 ### Changed
 - Fixed constraint for `removeSession`.
 

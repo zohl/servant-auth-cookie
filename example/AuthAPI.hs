@@ -6,6 +6,7 @@
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE OverloadedLists       #-}
 
 module AuthAPI (
   ExampleAPI
@@ -20,20 +21,14 @@ import Prelude ()
 import Prelude.Compat
 import Control.Monad.Catch (catch)
 import Control.Monad
-import Control.Monad.Trans.Except (ExceptT)
-import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict)
 import Data.Default (def)
 import Data.List (find)
 import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.Wai (Application, Request)
-#if MIN_VERSION_servant (0,9,0)
-import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
-#else
-import Servant (FromFormUrlEncoded(..), ToFormUrlEncoded(..), toQueryParam, ServantErr, throwError, err403, errBody)
-#endif
-import Servant ((:<|>)(..), (:>), ReqBody, FormUrlEncoded)
+import Servant (Handler, ReqBody, FormUrlEncoded)
+import Servant ((:<|>)(..), (:>), errBody, throwError, err403, toQueryParam)
 import Servant (Post, Headers, Header, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
@@ -44,6 +39,12 @@ import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import qualified Data.ByteString.Char8 as BSC8
+
+#if MIN_VERSION_servant (0,9,0)
+import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
+#else
+import Servant (FromFormUrlEncoded(..), ToFormUrlEncoded(..))
+#endif
 
 ----------------------------------------------------------------------------
 -- Accounts
@@ -95,7 +96,6 @@ instance ToForm LoginForm where
   toForm LoginForm {..} =
     [ ("username", toQueryParam lfUsername)
     , ("password", toQueryParam lfPassword) ]
-
 #else
 instance FromFormUrlEncoded LoginForm where
   fromFormUrlEncoded d = do
@@ -115,7 +115,6 @@ instance ToFormUrlEncoded LoginForm where
     , ("password", toQueryParam lfPassword) ]
 #endif
 
-
 ----------------------------------------------------------------------------
 -- API of the example
 
@@ -125,7 +124,7 @@ type ExampleAPI =
   :<|> "login" :> Get '[HTML] Markup
   :<|> "login" :> ReqBody '[FormUrlEncoded] LoginForm
        :> Post '[HTML] (Headers '[Header "set-cookie" EncryptedSession] Markup)
-  :<|> "logout" :> Get '[HTML] (Headers '[Header "set-cookie" ByteString] Markup)
+  :<|> "logout" :> Get '[HTML] (Headers '[Header "set-cookie" EncryptedSession] Markup)
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] Markup
 
 -- | Implementation
@@ -160,7 +159,7 @@ authHandler acs sk = mkAuthHandler $ \request ->
     (throwError err403 {errBody = "User doesn't exist"})
     (return)
   where
-    handleEx :: AuthCookieException -> ExceptT ServantErr IO (Maybe Account)
+    handleEx :: AuthCookieException -> Handler (Maybe Account)
     handleEx ex = throwError err403 {errBody = fromStrict . BSC8.pack $ show ex}
 
 -- | Authentication settings.
@@ -237,3 +236,4 @@ redirectPage uri = H.docTypeHtml $ do
     H.p $ do
       void "If your browser does not refresh the page click "
       H.a ! A.href (H.toValue uri) $ "here"
+
