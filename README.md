@@ -16,6 +16,11 @@ authentication at 8080 port. It's a simple three-paged web site that
 will show the private page only if a correct cookie is presented. For
 valid accounts see `usersDB` list in `example/Main.hs`.
 
+## Known limitations
+Renewal of a `ServerKey` immediately invalidates existing sessions, thus is not recommended to use frequently.
+Restarting an application with key renewal will result in the same effect.
+This is going to be fixed in the next release.
+
 ## See also
 - [Changelog](../master/CHANGELOG.md)
 
