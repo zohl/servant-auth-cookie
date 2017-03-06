@@ -23,6 +23,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 module Servant.Server.Experimental.Auth.Cookie
   ( CipherAlgorithm
@@ -35,9 +36,8 @@ module Servant.Server.Experimental.Auth.Cookie
   , getRandomBytes
 
   , ServerKey
-  , mkServerKey
-  , mkServerKeyFromBytes
-  , getServerKey
+  , ServerKeySet (..)
+  , PersistentServerKey (..)
 
   , AuthCookieSettings (..)
 
@@ -62,7 +62,7 @@ module Servant.Server.Experimental.Auth.Cookie
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
-import Control.Arrow ((&&&))
+-- import Control.Arrow ((&&&))
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
@@ -72,11 +72,11 @@ import Crypto.Error
 import Crypto.Hash (HashAlgorithm(..))
 import Crypto.Hash.Algorithms (SHA256)
 import Crypto.MAC.HMAC (HMAC)
-import Crypto.Random (drgNew, DRG(..))
+import Crypto.Random (DRG(..)) -- drgNew,
 import Data.ByteString (ByteString)
 import Data.Default
 import Data.IORef
-import Data.Maybe (fromMaybe)
+-- import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize
@@ -211,6 +211,7 @@ getRandomBytes (RandomSource mkDRG threshold ref) n = do
          then ((freshDRG, 0), result)
          else ((drg', bytes'), result)
 
+{-
 ----------------------------------------------------------------------------
 -- Server key
 
@@ -275,13 +276,29 @@ getServerKey ServerKey {..} = liftIO $ maybe
 
 -- | An initializer of 'ServerKey' state.
 mkServerKeyState
-  :: Int               -- ^ Size of the server key
+  :: Int                   -- ^ Size of the server key
   -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
   -> IO ServerKeyState
 mkServerKeyState skSize skMaxAge = do
   sksBytes  <- fst . randomBytesGenerate skSize <$> drgNew
   sksExpirationTime <- addUTCTime (fromMaybe 0 skMaxAge) <$> getCurrentTime
   return ServerKeyState {..}
+
+-}
+
+type ServerKey = ByteString
+
+class ServerKeySet k where
+  getCurrentKey  :: (MonadThrow m, MonadIO m) => k -> m ServerKey
+  getRotatedKeys :: (MonadThrow m, MonadIO m) => k -> m [ServerKey]
+
+
+data PersistentServerKey = PersistentServerKey
+  { pskBytes :: ServerKey }
+
+instance ServerKeySet PersistentServerKey where
+  getCurrentKey = return . pskBytes
+  getRotatedKeys = return . return $ []
 
 ----------------------------------------------------------------------------
 -- Settings
@@ -335,18 +352,18 @@ instance Default AuthCookieSettings where
 --     * 'TooShortProperKey'
 --     * 'CannotMakeIV'
 --     * 'BadProperKey'
-encryptCookie :: (MonadIO m, MonadThrow m)
+encryptCookie :: (MonadIO m, MonadThrow m, ServerKeySet k)
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> ServerKey         -- ^ 'ServerKey' to use
-  -> Cookie            -- ^ The 'Cookie' to encrypt
+  -> k                  -- ^ instance of 'ServerKeySet' to use
+  -> Cookie             -- ^ The 'Cookie' to encrypt
   -> m (Tagged EncryptedCookie ByteString)  -- ^ Encrypted 'Cookie' is form of 'ByteString'
-encryptCookie AuthCookieSettings {..} sk cookie = do
+encryptCookie AuthCookieSettings {..} sks cookie = do
   let iv = cookieIV cookie
       expiration = BSC8.pack $ formatTime
         defaultTimeLocale
         acsExpirationFormat
         (cookieExpirationTime cookie)
-  serverKey <- getServerKey sk
+  serverKey <- getCurrentKey sks
   key <- mkProperKey
     (cipherKeySize $ unProxy acsCipher)
     (sign acsHashAlgorithm serverKey $ iv <> expiration)
@@ -371,12 +388,12 @@ encryptCookie AuthCookieSettings {..} sk cookie = do
 --     * 'IncorrectMAC'
 --     * 'CannotParseExpirationTime'
 --     * 'CookieExpired'
-decryptCookie :: (MonadIO m, MonadThrow m)
+decryptCookie :: (MonadIO m, MonadThrow m, ServerKeySet k)
   => AuthCookieSettings                 -- ^ Options, see 'AuthCookieSettings'
-  -> ServerKey                          -- ^ 'ServerKey' to use
+  -> k                                  -- ^ instance of 'ServerKeySet' to use
   -> Tagged EncryptedCookie ByteString  -- ^ The 'ByteString' to decrypt
   -> m Cookie                           -- ^ The decrypted 'Cookie'
-decryptCookie AuthCookieSettings {..} sk (Tagged s) = do
+decryptCookie AuthCookieSettings {..} sks (Tagged s) = do
   currentTime <- liftIO getCurrentTime
   let ivSize  = blockSize (unProxy acsCipher)
       expSize =
@@ -387,9 +404,10 @@ decryptCookie AuthCookieSettings {..} sk (Tagged s) = do
       (iv,            s0) = BS.splitAt ivSize s
       (expirationRaw, s1) = BS.splitAt expSize s0
       (payloadRaw,   mac) = BS.splitAt payloadSize s1
-  serverKey <- getServerKey sk
+  serverKey <- getCurrentKey sks
   when (mac /= sign acsHashAlgorithm serverKey (BS.take butMacSize s)) $
     throwM (IncorrectMAC mac)
+  -- TODO getRotatedKeys and check again
   expirationTime <-
     maybe (throwM $ CannotParseExpirationTime expirationRaw) return $
       parseTimeM False defaultTimeLocale acsExpirationFormat
@@ -410,11 +428,11 @@ decryptCookie AuthCookieSettings {..} sk (Tagged s) = do
 
 -- | Pack session object into a cookie. The function can throw the same
 -- exceptions as 'encryptCookie'.
-encryptSession :: (MonadIO m, MonadThrow m, Serialize a)
+encryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> RandomSource      -- ^ Random source to use
-  -> ServerKey         -- ^ 'ServerKey' to use
-  -> a                 -- ^ Session value
+  -> RandomSource       -- ^ Random source to use
+  -> k                  -- ^ instance of 'ServerKeySet' to use
+  -> a                  -- ^ Session value
   -> m (Tagged SerializedEncryptedCookie ByteString)  -- ^ Serialized and encrypted session
 encryptSession acs@AuthCookieSettings {..} randomSource sk session = do
   iv <- getRandomBytes randomSource (blockSize $ unProxy acsCipher)
@@ -432,15 +450,15 @@ encryptSession acs@AuthCookieSettings {..} randomSource sk session = do
 
 -- | Unpack session value from a cookie. The function can throw the same
 -- exceptions as 'decryptCookie'.
-decryptSession :: (MonadIO m, MonadThrow m, Serialize a)
+decryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings                           -- ^ Options, see 'AuthCookieSettings'
-  -> ServerKey                                    -- ^ 'ServerKey' to use
+  -> k                                            -- ^ instance of 'ServerKeySet' to use
   -> Tagged SerializedEncryptedCookie ByteString  -- ^ Cookie in binary form
   -> m a                                          -- ^ Unpacked session value
-decryptSession acs@AuthCookieSettings {..} sk s =
+decryptSession acs@AuthCookieSettings {..} sks s =
   let fromRight = either (throwM . SessionDeserializationFailed) return
   in fromRight (base64Decode s) >>=
-     decryptCookie acs sk        >>=
+     decryptCookie acs sks      >>=
      fromRight . runGet get . cookiePayload
 
 ----------------------------------------------------------------------------
@@ -452,13 +470,14 @@ addSession
   :: ( MonadIO m
      , MonadThrow m
      , Serialize a
-     , AddHeader (e :: Symbol) EncryptedSession s r )
+     , AddHeader (e :: Symbol) EncryptedSession s r
+     , ServerKeySet k )
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> RandomSource     -- ^ Random source to use
-  -> ServerKey         -- ^ 'ServerKey' to use
-  -> a                 -- ^ The session value
-  -> s                 -- ^ Response to add session to
-  -> m r               -- ^ Response with the session added
+  -> RandomSource       -- ^ Random source to use
+  -> k                  -- ^ instance of 'ServerKeySet' to use
+  -> a                  -- ^ The session value
+  -> s                  -- ^ Response to add session to
+  -> m r                -- ^ Response with the session added
 addSession acs rs sk sessionData response = do
   header <- renderSession acs rs sk sessionData
   return (addHeader (EncryptedSession header) response)
@@ -490,12 +509,13 @@ removeSession AuthCookieSettings{..} response =
 addSessionToErr
   :: ( MonadIO m
      , MonadThrow m
-     , Serialize a )
+     , Serialize a
+     , ServerKeySet k )
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> RandomSource      -- ^ Random source to use
-  -> ServerKey         -- ^ 'ServerKey' to use
-  -> a                 -- ^ The session value
-  -> ServantErr        -- ^ Servant error to add the cookie to
+  -> RandomSource       -- ^ Random source to use
+  -> k                  -- ^ instance of 'ServerKeySet' to use
+  -> a                  -- ^ The session value
+  -> ServantErr         -- ^ Servant error to add the cookie to
   -> m ServantErr
 addSessionToErr acs rs sk sessionData err = do
   header <- renderSession acs rs sk sessionData
@@ -504,11 +524,11 @@ addSessionToErr acs rs sk sessionData err = do
 -- | Request handler that checks cookies. If 'Cookie' is just missing, you
 -- get 'Nothing', but if something is wrong with its format, 'getSession'
 -- can throw the same exceptions as 'decryptSession'.
-getSession :: (MonadIO m, MonadThrow m, Serialize a)
+getSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> ServerKey         -- ^ 'ServerKey' to use
-  -> Request           -- ^ The request
-  -> m (Maybe a)       -- ^ The result
+  -> k                  -- ^ 'ServerKeySet' to use
+  -> Request            -- ^ The request
+  -> m (Maybe a)        -- ^ The result
 getSession acs@AuthCookieSettings {..} sk request = do
   let cookies = parseCookies <$> lookup hCookie (requestHeaders request)
       sessionBinary = cookies >>= lookup acsSessionField
@@ -518,10 +538,11 @@ getSession acs@AuthCookieSettings {..} sk request = do
 renderSession
   :: ( MonadIO m
      , MonadThrow m
-     , Serialize a )
+     , Serialize a
+     , ServerKeySet k )
   => AuthCookieSettings
   -> RandomSource
-  -> ServerKey
+  -> k
   -> a
   -> m ByteString
 renderSession acs@AuthCookieSettings {..} rs sk sessionData = do
@@ -538,9 +559,9 @@ renderSession acs@AuthCookieSettings {..} rs sk sessionData = do
 -- Default auth handler
 
 -- | Cookie authentication handler.
-defaultAuthHandler :: Serialize a
-  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> ServerKey         -- ^ 'ServerKey' to use
+defaultAuthHandler :: (Serialize a, ServerKeySet k)
+  => AuthCookieSettings    -- ^ Options, see 'AuthCookieSettings'
+  -> k                     -- ^ instance of 'ServerKeySet' to use
   -> AuthHandler Request a -- ^
 defaultAuthHandler acs sk = mkAuthHandler $ \request -> do
   msession <- liftIO (getSession acs sk request)
@@ -602,3 +623,4 @@ applyCipherAlgorithm f ivRaw keyRaw msg = do
 
 unProxy :: Proxy a -> a
 unProxy Proxy = undefined
+

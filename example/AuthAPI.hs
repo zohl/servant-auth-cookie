@@ -129,8 +129,12 @@ type ExampleAPI =
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] Markup
 
 -- | Implementation
-server :: AuthCookieSettings -> RandomSource -> ServerKey -> Server ExampleAPI
-server settings rs sk = serveHome
+server :: (ServerKeySet s)
+  => AuthCookieSettings
+  -> RandomSource
+  -> s
+  -> Server ExampleAPI
+server settings rs sks = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
     :<|> serveLogout
@@ -145,7 +149,7 @@ server settings rs sk = serveHome
       Just uid -> addSession
         settings -- the settings
         rs       -- random source
-        sk       -- server key
+        sks      -- server key set
         (Account uid lfUsername lfPassword)
         (redirectPage "/private")
 
@@ -154,9 +158,9 @@ server settings rs sk = serveHome
   servePrivate (Account uid u p) = return (privatePage uid u p)
 
 -- | Custom handler that bluntly reports any occurred errors.
-authHandler :: AuthCookieSettings -> ServerKey -> AuthHandler Request Account
-authHandler acs sk = mkAuthHandler $ \request ->
-  (getSession acs sk request) `catch` handleEx >>= maybe
+authHandler :: (ServerKeySet s) => AuthCookieSettings -> s -> AuthHandler Request Account
+authHandler acs sks = mkAuthHandler $ \request ->
+  (getSession acs sks request) `catch` handleEx >>= maybe
     (throwError err403 {errBody = "No cookies"})
     (return)
   where
@@ -172,11 +176,11 @@ authSettings :: AuthCookieSettings
 authSettings = def {acsCookieFlags = ["HttpOnly"]}
 
 -- | Application
-app :: AuthCookieSettings -> RandomSource -> ServerKey -> Application
-app settings rs sk = serveWithContext
+app :: (ServerKeySet s) => AuthCookieSettings -> RandomSource -> s -> Application
+app settings rs sks = serveWithContext
   (Proxy :: Proxy ExampleAPI)
-  ((authHandler settings sk) :. EmptyContext)
-  (server settings rs sk)
+  ((authHandler settings sks) :. EmptyContext)
+  (server settings rs sks)
 
 
 ----------------------------------------------------------------------------
