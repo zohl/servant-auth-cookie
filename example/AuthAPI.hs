@@ -28,7 +28,7 @@ import Data.List (find)
 import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.Wai (Application, Request)
-import Servant (Handler, ReqBody, FormUrlEncoded)
+import Servant (Handler, ReqBody, FormUrlEncoded, Capture)
 import Servant ((:<|>)(..), (:>), errBody, throwError, err403, toQueryParam)
 import Servant (Post, Headers, Header, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
@@ -39,6 +39,7 @@ import Text.Blaze.Html5 ((!), Markup)
 import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
+import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8 as BSC8
 
 #if MIN_VERSION_servant (0,9,0)
@@ -128,6 +129,12 @@ type ExampleAPI =
   :<|> "logout" :> Get '[HTML] (Headers '[Header "set-cookie" EncryptedSession] Markup)
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] Markup
 
+  :<|> "keys" :> (
+         Get '[HTML] Markup
+    :<|> "add" :> Get '[HTML] Markup
+    :<|> "remove" :> Capture "key" String :> Get '[HTML] Markup)
+
+
 -- | Implementation
 server :: (ServerKeySet s)
   => AuthCookieSettings
@@ -138,7 +145,8 @@ server settings rs sks = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
     :<|> serveLogout
-    :<|> servePrivate where
+    :<|> servePrivate
+    :<|> serveKeys where
 
   serveHome = return homePage
   serveLogin = return (loginPage True)
@@ -151,11 +159,20 @@ server settings rs sks = serveHome
         rs       -- random source
         sks      -- server key set
         (Account uid lfUsername lfPassword)
-        (redirectPage "/private")
+        (redirectPage "/private" "Session has been started")
 
-  serveLogout = removeSession settings (redirectPage "/")
+  serveLogout = removeSession settings (redirectPage "/" "Session has been terminated")
 
   servePrivate (Account uid u p) = return (privatePage uid u p)
+
+  serveKeys = (keysPage <$> getKeys sks) :<|> addKey :<|> removeKey
+
+  addKey = do
+    updateKeys sks
+    return $ redirectPage "/keys" "New key was added"
+
+  removeKey key = (return $ redirectPage "/keys" "The key was removed")
+
 
 -- | Custom handler that bluntly reports any occurred errors.
 authHandler :: (ServerKeySet s) => AuthCookieSettings -> s -> AuthHandler Request Account
@@ -193,6 +210,8 @@ pageMenu = do
   H.a ! A.href "/login"   $ "login"
   void " "
   H.a ! A.href "/private" $ "private"
+  void " "
+  H.a ! A.href "/keys"    $ "keys"
   H.hr
 
 homePage :: Markup
@@ -229,14 +248,33 @@ privatePage uid username' password' = H.docTypeHtml $ do
     H.p $ H.b "username: " >> H.toHtml username'
     H.p $ H.b "password: " >> H.toHtml password'
     H.hr
-    H.a ! A.href "/logout"  $ "logout"
+    H.a ! A.href "/logout" $ "logout"
 
-redirectPage :: String -> Markup
-redirectPage uri = H.docTypeHtml $ do
+keysPage :: (BSC8.ByteString, [BSC8.ByteString]) -> Markup
+keysPage (k, ks) = H.docTypeHtml $ do
+  H.head (H.title "keys")
+  H.body $ do
+    pageMenu
+    H.a ! A.href "/keys/add" $ "add new key"
+    H.p $ H.b $ keyElement False k
+    mapM_ H.p $ map (keyElement True) ks
+
+keyElement :: Bool -> BSC8.ByteString -> Markup
+keyElement removable key = let
+  b64key =  BSC8.unpack . Base64.encode $ key
+  in do
+     H.toHtml b64key
+     when (removable) $ do
+       void " "
+       H.a ! A.href (H.stringValue $ "/keys/remove/" ++ b64key) $ "(remove)"
+
+redirectPage :: String -> String -> Markup
+redirectPage uri message = H.docTypeHtml $ do
   H.head $ do
     H.title "redirecting..."
     H.meta ! A.httpEquiv "refresh" ! A.content (H.toValue $ "1; url=" ++ uri)
   H.body $ do
+    H.p $ H.toHtml message
     H.p "You are being redirected."
     H.p $ do
       void "If your browser does not refresh the page click "

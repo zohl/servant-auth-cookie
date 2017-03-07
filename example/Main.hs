@@ -18,6 +18,7 @@ import Servant.Server.Experimental.Auth.Cookie
 main :: IO ()
 main = do
   rs <- mkRandomSource drgNew 1000
-  let sks = PersistentServerKey "123456789abcdef"
+  -- let sks = PersistentServerKey "123456789abcdef"
+  sks <- mkRenewableKeySet 4 16
   run 8080 (app authSettings rs sks)
 

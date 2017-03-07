@@ -106,6 +106,7 @@ executable example
   if flag(build-examples)
     build-depends: base           >= 4.7  && < 5.0
                  , base-compat    >= 0.9.1 && <0.10
+                 , base64-bytestring
                  , blaze-html     >= 0.8  && < 0.10
                  , blaze-markup   >= 0.7  && < 0.9
                  , bytestring
@@ -153,6 +154,7 @@ test-suite example-tests
   if flag(build-examples)
     build-depends: base           >= 4.7  && < 5.0
                  , base-compat    >= 0.9.1 && <0.10
+                 , base64-bytestring
                  , blaze-markup
                  , blaze-html     >= 0.8  && < 0.10
                  , bytestring

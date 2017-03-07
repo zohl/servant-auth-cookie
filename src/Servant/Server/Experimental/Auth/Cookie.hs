@@ -39,6 +39,9 @@ module Servant.Server.Experimental.Auth.Cookie
   , ServerKeySet (..)
   , PersistentServerKey (..)
 
+  , RenewableKeySet
+  , mkRenewableKeySet
+
   , AuthCookieSettings (..)
 
   , EncryptedSession (..)
@@ -62,7 +65,7 @@ module Servant.Server.Experimental.Auth.Cookie
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
--- import Control.Arrow ((&&&))
+import Control.Arrow ((&&&))
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
@@ -72,11 +75,11 @@ import Crypto.Error
 import Crypto.Hash (HashAlgorithm(..))
 import Crypto.Hash.Algorithms (SHA256)
 import Crypto.MAC.HMAC (HMAC)
-import Crypto.Random (DRG(..)) -- drgNew,
+import Crypto.Random (DRG(..), drgNew)
 import Data.ByteString (ByteString)
 import Data.Default
 import Data.IORef
--- import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize
@@ -289,16 +292,39 @@ mkServerKeyState skSize skMaxAge = do
 type ServerKey = ByteString
 
 class ServerKeySet k where
-  getCurrentKey  :: (MonadThrow m, MonadIO m) => k -> m ServerKey
-  getRotatedKeys :: (MonadThrow m, MonadIO m) => k -> m [ServerKey]
-
+  getKeys :: (MonadThrow m, MonadIO m) => k -> m (ServerKey, [ServerKey])
+  updateKeys :: (MonadThrow m, MonadIO m) => k -> m ()
 
 data PersistentServerKey = PersistentServerKey
   { pskBytes :: ServerKey }
 
 instance ServerKeySet PersistentServerKey where
-  getCurrentKey = return . pskBytes
-  getRotatedKeys = return . return $ []
+  getKeys = return . (,[]) . pskBytes
+  updateKeys = const . return $ ()
+
+
+
+data RenewableKeySet = RenewableKeySet {
+    rskKeys    :: IORef [ServerKey]
+  , rskMaxKeys :: Int
+  , rskKeySize :: Int
+  }
+
+instance ServerKeySet RenewableKeySet where
+  getKeys k = liftIO $ (head &&& tail) <$> readIORef (rskKeys k)
+
+  updateKeys k = liftIO $ do
+    key <- (fst . randomBytesGenerate (rskKeySize k) <$> drgNew)
+    atomicModifyIORef' (rskKeys k) $ (,()) . take (rskMaxKeys k) . (key:)
+
+mkRenewableKeySet :: Int -> Int -> IO RenewableKeySet
+mkRenewableKeySet rskMaxKeys rskKeySize = do
+  rskKeys <- newIORef []
+  let result = RenewableKeySet {..}
+  updateKeys result
+  return result
+
+
 
 ----------------------------------------------------------------------------
 -- Settings
@@ -363,7 +389,7 @@ encryptCookie AuthCookieSettings {..} sks cookie = do
         defaultTimeLocale
         acsExpirationFormat
         (cookieExpirationTime cookie)
-  serverKey <- getCurrentKey sks
+  (serverKey, _) <- getKeys sks
   key <- mkProperKey
     (cipherKeySize $ unProxy acsCipher)
     (sign acsHashAlgorithm serverKey $ iv <> expiration)
@@ -404,7 +430,7 @@ decryptCookie AuthCookieSettings {..} sks (Tagged s) = do
       (iv,            s0) = BS.splitAt ivSize s
       (expirationRaw, s1) = BS.splitAt expSize s0
       (payloadRaw,   mac) = BS.splitAt payloadSize s1
-  serverKey <- getCurrentKey sks
+  (serverKey, _) <- getKeys sks
   when (mac /= sign acsHashAlgorithm serverKey (BS.take butMacSize s)) $
     throwM (IncorrectMAC mac)
   -- TODO getRotatedKeys and check again
