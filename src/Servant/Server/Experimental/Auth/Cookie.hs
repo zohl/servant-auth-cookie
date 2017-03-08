@@ -294,6 +294,7 @@ type ServerKey = ByteString
 class ServerKeySet k where
   getKeys :: (MonadThrow m, MonadIO m) => k -> m (ServerKey, [ServerKey])
   updateKeys :: (MonadThrow m, MonadIO m) => k -> m ()
+  removeKey :: (MonadThrow m, MonadIO m) => k -> ServerKey -> m ()
 
 data PersistentServerKey = PersistentServerKey
   { pskBytes :: ServerKey }
@@ -301,7 +302,7 @@ data PersistentServerKey = PersistentServerKey
 instance ServerKeySet PersistentServerKey where
   getKeys = return . (,[]) . pskBytes
   updateKeys = const . return $ ()
-
+  removeKey _ = const . return $ ()
 
 
 data RenewableKeySet = RenewableKeySet {
@@ -316,6 +317,10 @@ instance ServerKeySet RenewableKeySet where
   updateKeys k = liftIO $ do
     key <- (fst . randomBytesGenerate (rskKeySize k) <$> drgNew)
     atomicModifyIORef' (rskKeys k) $ (,()) . take (rskMaxKeys k) . (key:)
+
+  removeKey k key = liftIO $
+    atomicModifyIORef' (rskKeys k) $ (,()) . filter (/= key)
+
 
 mkRenewableKeySet :: Int -> Int -> IO RenewableKeySet
 mkRenewableKeySet rskMaxKeys rskKeySize = do

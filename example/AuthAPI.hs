@@ -27,6 +27,7 @@ import Data.Default (def)
 import Data.List (find)
 import Data.Serialize (Serialize)
 import GHC.Generics
+import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application, Request)
 import Servant (Handler, ReqBody, FormUrlEncoded, Capture)
 import Servant ((:<|>)(..), (:>), errBody, throwError, err403, toQueryParam)
@@ -132,7 +133,7 @@ type ExampleAPI =
   :<|> "keys" :> (
          Get '[HTML] Markup
     :<|> "add" :> Get '[HTML] Markup
-    :<|> "remove" :> Capture "key" String :> Get '[HTML] Markup)
+    :<|> "rem" :> Capture "key" String :> Get '[HTML] Markup)
 
 
 -- | Implementation
@@ -165,14 +166,18 @@ server settings rs sks = serveHome
 
   servePrivate (Account uid u p) = return (privatePage uid u p)
 
-  serveKeys = (keysPage <$> getKeys sks) :<|> addKey :<|> removeKey
+  serveKeys = (keysPage <$> getKeys sks) :<|> addKey :<|> remKey
 
   addKey = do
     updateKeys sks
     return $ redirectPage "/keys" "New key was added"
 
-  removeKey key = (return $ redirectPage "/keys" "The key was removed")
-
+  remKey b64key = either
+    (\err -> throwError err403 { errBody = fromStrict . BSC8.pack $ err })
+    (\key -> do
+      removeKey sks key
+      return $ redirectPage "/keys" "The key was removed")
+    (Base64.decode . BSC8.pack $ b64key)
 
 -- | Custom handler that bluntly reports any occurred errors.
 authHandler :: (ServerKeySet s) => AuthCookieSettings -> s -> AuthHandler Request Account
@@ -261,12 +266,13 @@ keysPage (k, ks) = H.docTypeHtml $ do
 
 keyElement :: Bool -> BSC8.ByteString -> Markup
 keyElement removable key = let
-  b64key =  BSC8.unpack . Base64.encode $ key
+  b64key =  Base64.encode $ key
+  url = "/keys/rem/" ++ (BSC8.unpack . urlEncode True $ b64key)
   in do
-     H.toHtml b64key
+     H.toHtml (BSC8.unpack b64key)
      when (removable) $ do
        void " "
-       H.a ! A.href (H.stringValue $ "/keys/remove/" ++ b64key) $ "(remove)"
+       H.a ! A.href (H.stringValue url) $ "(remove)"
 
 redirectPage :: String -> String -> Markup
 redirectPage uri message = H.docTypeHtml $ do
