@@ -29,7 +29,7 @@ import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application, Request)
-import Servant (Handler, ReqBody, FormUrlEncoded, Capture)
+import Servant (Handler, ReqBody, FormUrlEncoded, Capture, noHeader)
 import Servant ((:<|>)(..), (:>), errBody, throwError, err403, toQueryParam)
 import Servant (Post, Headers, Header, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
@@ -121,15 +121,14 @@ instance ToFormUrlEncoded LoginForm where
 ----------------------------------------------------------------------------
 -- API of the example
 
+
 -- | Interface
 type ExampleAPI =
        Get '[HTML] Markup
   :<|> "login" :> Get '[HTML] Markup
-  :<|> "login" :> ReqBody '[FormUrlEncoded] LoginForm
-       :> Post '[HTML] (Headers '[Header "set-cookie" EncryptedSession] Markup)
-  :<|> "logout" :> Get '[HTML] (Headers '[Header "set-cookie" EncryptedSession] Markup)
-  :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] Markup
-
+  :<|> "login" :> ReqBody '[FormUrlEncoded] LoginForm :> Post '[HTML] (Cookied Markup)
+  :<|> "logout" :> Get '[HTML] (Cookied Markup)
+  :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] (Cookied Markup)
   :<|> "keys" :> (
          Get '[HTML] Markup
     :<|> "add" :> Get '[HTML] Markup
@@ -149,22 +148,27 @@ server settings rs sks = serveHome
     :<|> servePrivate
     :<|> serveKeys where
 
+  addSession' = addSession
+    settings -- the settings
+    rs       -- random source
+    sks      -- server key set
+
   serveHome = return homePage
   serveLogin = return (loginPage True)
 
   serveLoginPost LoginForm {..} =
     case userLookup lfUsername lfPassword usersDB of
       Nothing   -> return $ addHeader emptyEncryptedSession (loginPage False)
-      Just uid -> addSession
-        settings -- the settings
-        rs       -- random source
-        sks      -- server key set
+      Just uid  -> addSession'
         (Account uid lfUsername lfPassword)
         (redirectPage "/private" "Session has been started")
 
   serveLogout = removeSession settings (redirectPage "/" "Session has been terminated")
 
-  servePrivate (Account uid u p) = return (privatePage uid u p)
+  cookied :: (Account -> Markup) -> ((Account, Bool) -> Handler (Cookied Markup))
+  cookied f = \(a, b) -> (if b then addSession' a else (return . noHeader)) $ f a
+
+  servePrivate = cookied $ \(Account uid u p) -> privatePage uid u p
 
   serveKeys = (keysPage <$> getKeys sks) :<|> addKey :<|> remKey
 
@@ -180,13 +184,16 @@ server settings rs sks = serveHome
     (Base64.decode . BSC8.pack $ b64key)
 
 -- | Custom handler that bluntly reports any occurred errors.
-authHandler :: (ServerKeySet s) => AuthCookieSettings -> s -> AuthHandler Request Account
+authHandler :: (ServerKeySet s)
+  => AuthCookieSettings
+  -> s
+  -> AuthHandler Request (Account, Bool)
 authHandler acs sks = mkAuthHandler $ \request ->
   (getSession acs sks request) `catch` handleEx >>= maybe
     (throwError err403 {errBody = "No cookies"})
     (return)
   where
-    handleEx :: AuthCookieException -> Handler (Maybe Account)
+    handleEx :: AuthCookieException -> Handler (Maybe (Account, Bool))
     handleEx ex = throwError err403 {errBody = fromStrict . BSC8.pack $ show ex}
 
 -- | Authentication settings.
