@@ -79,7 +79,7 @@ import Crypto.Random (DRG(..), drgNew)
 import Data.ByteString (ByteString)
 import Data.Default
 import Data.IORef
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize
@@ -435,10 +435,16 @@ decryptCookie AuthCookieSettings {..} sks (Tagged s) = do
       (iv,            s0) = BS.splitAt ivSize s
       (expirationRaw, s1) = BS.splitAt expSize s0
       (payloadRaw,   mac) = BS.splitAt payloadSize s1
-  (serverKey, _) <- getKeys sks
-  when (mac /= sign acsHashAlgorithm serverKey (BS.take butMacSize s)) $
-    throwM (IncorrectMAC mac)
-  -- TODO getRotatedKeys and check again
+      checkMac sk = mac == sign acsHashAlgorithm sk (BS.take butMacSize s)
+
+  (currentKey, rotatedKeys) <- getKeys sks
+  (serverKey, _renew) <- if checkMac currentKey
+    then return (currentKey, False)
+    else (,True) <$> maybe
+      (throwM $ IncorrectMAC mac)
+      (return)
+      (listToMaybe . map fst . filter snd . map (id &&& checkMac) $ rotatedKeys)
+
   expirationTime <-
     maybe (throwM $ CannotParseExpirationTime expirationRaw) return $
       parseTimeM False defaultTimeLocale acsExpirationFormat
