@@ -3,6 +3,7 @@
 ## [Unreleased]
 ### Added
 - Tests for the example.
+- `parseSessionRequest` and `parseSessionResponse` functions.
 
 ### Changed
 - Fixed constraint for `removeSession`.

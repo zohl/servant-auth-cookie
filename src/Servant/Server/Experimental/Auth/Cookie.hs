@@ -61,6 +61,8 @@ module Servant.Server.Experimental.Auth.Cookie
 
   -- exposed for testing purpose
   , renderSession
+  , parseSessionRequest
+  , parseSessionResponse
 
   -- , defaultAuthHandler
   ) where
@@ -88,9 +90,9 @@ import Data.Time
 import Data.Tagged (Tagged (..), retag)
 import Data.Typeable
 import GHC.TypeLits (Symbol)
-import Network.HTTP.Types (hCookie)
+import Network.HTTP.Types (hCookie, HeaderName, RequestHeaders, ResponseHeaders)
 import Network.Wai (Request, requestHeaders)
-import Servant (Header, addHeader, ServantErr (..))
+import Servant (addHeader, ServantErr (..))
 import Servant.API.Experimental.Auth (AuthProtect)
 import Servant.API.ResponseHeaders (Headers, AddHeader)
 import Servant.Server (err403)
@@ -101,6 +103,8 @@ import qualified Data.ByteArray         as BA
 import qualified Data.ByteString        as BS
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8  as BSC8
+import qualified Servant.API.Header as S(Header)
+import qualified Network.HTTP.Types as N(Header)
 
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative
@@ -147,7 +151,7 @@ instance ToByteString EncryptedSession where
 #endif
 
 -- | Helper type to wrap endpoints.
-type Cookied a = Headers '[Header "set-cookie" EncryptedSession] a
+type Cookied a = Headers '[S.Header "set-cookie" EncryptedSession] a
 
 -- | The exception is thrown when something goes wrong with this package.
 data AuthCookieException
@@ -570,10 +574,38 @@ getSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   -> k                   -- ^ 'ServerKeySet' to use
   -> Request             -- ^ The request
   -> m (Maybe (a, Bool)) -- ^ The result
-getSession acs@AuthCookieSettings {..} sk request = do
-  let cookies = parseCookies <$> lookup hCookie (requestHeaders request)
-      sessionBinary = cookies >>= lookup acsSessionField
-  maybe (return Nothing) (liftM Just . decryptSession acs sk . Tagged) sessionBinary
+getSession acs@AuthCookieSettings {..} sk request = maybe
+  (return Nothing)
+  (liftM Just . decryptSession acs sk)
+  (parseSessionRequest acs $ requestHeaders request)
+
+
+  -- let cookies = parseCookies <$> lookup hCookie (requestHeaders request)
+  --     sessionBinary = cookies >>= lookup acsSessionField
+  -- maybe (return Nothing) (liftM Just . decryptSession acs sk . Tagged) sessionBinary
+parseSession
+  :: AuthCookieSettings
+  -> HeaderName
+  -> [N.Header]
+  -> Maybe (Tagged SerializedEncryptedCookie ByteString)
+parseSession AuthCookieSettings {..} hdr hdrs = sessionBinary where
+  cookies = parseCookies <$> lookup hdr hdrs
+  sessionBinary = Tagged <$> (cookies >>= lookup acsSessionField)
+
+-- | Parse session cookie from 'RequestHeaders'.
+parseSessionRequest
+  :: AuthCookieSettings
+  -> RequestHeaders
+  -> Maybe (Tagged SerializedEncryptedCookie ByteString)
+parseSessionRequest acs hdrs = parseSession acs hCookie hdrs
+
+-- | Parse session cookie from 'ResponseHeaders'.
+parseSessionResponse
+  :: AuthCookieSettings
+  -> ResponseHeaders
+  -> Maybe (Tagged SerializedEncryptedCookie ByteString)
+parseSessionResponse acs hdrs = parseSession acs "set-cookie" hdrs
+
 
 -- | Render session cookie to 'ByteString'.
 renderSession
