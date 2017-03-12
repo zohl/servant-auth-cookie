@@ -38,7 +38,9 @@ module Servant.Server.Experimental.Auth.Cookie
 
   , ServerKey
   , ServerKeySet (..)
-  , PersistentServerKey (..)
+
+  , PersistentServerKey
+  , mkPersistentServerKey
 
   , RenewableKeySet
   , mkRenewableKeySet
@@ -303,8 +305,13 @@ class ServerKeySet k where
   updateKeys :: (MonadThrow m, MonadIO m) => k -> m ()
   removeKey :: (MonadThrow m, MonadIO m) => k -> ServerKey -> m ()
 
+
 data PersistentServerKey = PersistentServerKey
   { pskBytes :: ServerKey }
+
+mkPersistentServerKey :: ByteString -> PersistentServerKey
+mkPersistentServerKey bytes = PersistentServerKey { pskBytes = bytes }
+
 
 instance ServerKeySet PersistentServerKey where
   getKeys = return . (,[]) . pskBytes
