@@ -134,7 +134,6 @@ type ExampleAPI =
     :<|> "add" :> Get '[HTML] Markup
     :<|> "rem" :> Capture "key" String :> Get '[HTML] Markup)
 
-
 -- | Implementation
 server :: (ServerKeySet s)
   => AuthCookieSettings
@@ -145,13 +144,18 @@ server settings rs sks = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
     :<|> serveLogout
-    :<|> servePrivate
+    :<|> (cookied' servePrivate)
     :<|> serveKeys where
 
   addSession' = addSession
     settings -- the settings
     rs       -- random source
     sks      -- server key set
+
+  cookied' = cookied
+    settings
+    rs
+    sks
 
   serveHome = return homePage
   serveLogin = return (loginPage True)
@@ -165,10 +169,8 @@ server settings rs sks = serveHome
 
   serveLogout = removeSession settings (redirectPage "/" "Session has been terminated")
 
-  cookied :: (Account -> Markup) -> ((Account, Bool) -> Handler (Cookied Markup))
-  cookied f = \(a, b) -> (if b then addSession' a else (return . noHeader)) $ f a
 
-  servePrivate = cookied $ \(Account uid u p) -> privatePage uid u p
+  servePrivate (Account uid u p) = privatePage uid u p
 
   serveKeys = (keysPage <$> getKeys sks) :<|> addKey :<|> remKey
 
@@ -187,13 +189,13 @@ server settings rs sks = serveHome
 authHandler :: (ServerKeySet s)
   => AuthCookieSettings
   -> s
-  -> AuthHandler Request (Account, Bool)
+  -> AuthHandler Request (WithMetadata Account)
 authHandler acs sks = mkAuthHandler $ \request ->
   (getSession acs sks request) `catch` handleEx >>= maybe
     (throwError err403 {errBody = "No cookies"})
     (return)
   where
-    handleEx :: AuthCookieException -> Handler (Maybe (Account, Bool))
+    handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata Account))
     handleEx ex = throwError err403 {errBody = fromStrict . BSC8.pack $ show ex}
 
 -- | Authentication settings.

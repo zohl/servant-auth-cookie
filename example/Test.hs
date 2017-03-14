@@ -151,7 +151,7 @@ getPrivate :: BS.ByteString -> WaiSession SResponse
 getPrivate cookieValue = request
   methodGet "/private" [(hCookie, cookieValue)] ""
 
-extractSession :: SpecState -> SResponse -> IO (Account, Bool)
+extractSession :: SpecState -> SResponse -> IO (WithMetadata Account)
 extractSession SpecState {..} SResponse {..} = maybe
   (error "cookies aren't available")
   (decryptSession ssAuthSettings ssServerKeySet)
@@ -164,5 +164,5 @@ forgeCookies :: (ServerKeySet k)
   -> SResponse
   -> IO BS.ByteString
 forgeCookies ss newAuthSettings newServerKeySet r = extractSession ss r
-  >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . fst
+  >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . wmData
 
