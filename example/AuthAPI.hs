@@ -311,7 +311,7 @@ keyElement removable key = let
   b64key =  Base64.encode $ key
   url = "/keys/rem/" ++ (BSC8.unpack . urlEncode True $ b64key)
   in do
-     H.toHtml (BSC8.unpack b64key)
+     H.span ! A.class_ "key" $ H.toHtml (BSC8.unpack b64key)
      when (removable) $ do
        void " "
        H.a ! A.href (H.stringValue url) $ "(remove)"

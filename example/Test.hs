@@ -5,12 +5,15 @@
 
 import Prelude ()
 import Prelude.Compat
+import Control.Arrow ((***))
+import Control.Monad (void)
+import Data.Monoid ((<>))
 import Data.Maybe (fromMaybe)
 import Data.Int (Int64)
 import Data.Time.Clock (UTCTime(..))
 import Control.Monad.IO.Class (liftIO)
-import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..))
-import Test.Hspec (Spec, hspec, describe, context, it)
+import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..), mkExampleKeySet)
+import Test.Hspec (Spec, hspec, describe, context, it, shouldBe, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, WaiExpectation, shouldRespondWith, with, request, get)
 import Text.Blaze.Renderer.Utf8 (renderMarkup)
 import Text.Blaze (Markup)
@@ -18,12 +21,15 @@ import Servant (Proxy(..))
 import Crypto.Random (drgNew)
 import Servant (FormUrlEncoded, contentType)
 import Servant.Server.Experimental.Auth.Cookie
-import Network.HTTP.Types (Header, methodGet, methodPost, hContentType, hCookie)
+import Network.HTTP.Types (Header, methodGet, methodPost, hContentType, hCookie, urlEncode)
 import Network.HTTP.Media.RenderHeader (renderHeader)
 import Network.Wai.Test (SResponse(..))
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC8
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC8
+import qualified Text.Blaze.Html5 as H
+import qualified Text.Blaze.Html5.Attributes as A
 
 #if MIN_VERSION_hspec_wai (0,7,0)
 import Test.Hspec.Wai.Matcher (bodyEquals, ResponseMatcher(..), MatchBody(..))
@@ -51,6 +57,9 @@ main = do
 
   hspec . basicSpec . SpecState rs authSettings $
     mkPersistentServerKey "0123456789abcdef"
+
+  hspec . renewalSpec . SpecState rs authSettings
+    =<< mkExampleKeySet 3 16
 
 
 basicSpec :: SpecState -> Spec
@@ -104,6 +113,61 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
         >>= liftIO . forgeCookies ss newAuthSettings ssServerKeySet
       let t = UTCTime (toEnum 0) 0
       getPrivate cookieValue `shouldRespondWithException` (CookieExpired t t)
+
+
+renewalSpec :: SpecState -> Spec
+renewalSpec ss@(SpecState {..}) = describe "renewal functionality" $ with
+  (return $ app ssAuthSettings ssRandomSource ssServerKeySet) $ do
+
+  context "keys" $ do
+    it "automatically creates a key" $ do
+      keys <- extractKeys
+      liftIO $ keys `shouldSatisfy` ((== 1) . length)
+
+    it "adds new key" $ do
+      keys <- extractKeys
+      addKey
+      keys' <- extractKeys
+      liftIO $ keys `shouldBe` (tail keys')
+
+    it "removes a key" $ do
+      keys <- extractKeys
+      remKey $ last keys
+      keys' <- extractKeys
+      liftIO $ keys' `shouldBe` (init keys)
+
+  context "cookies" $ do
+    let loginRequest = login "mr_foo" "password1"
+
+    let getCookieValue req = req >>= \resp -> return $ fromMaybe
+          (error "cookies aren't available")
+          (lookup "set-cookie" $ simpleHeaders resp)
+
+    it "rejects requests with deleted keys" $ do
+      cookieValue <- getCookieValue loginRequest
+      getPrivate cookieValue `shouldRespondWith` 200
+
+      key <- head <$> extractKeys
+      addKey >> remKey key
+
+      getPrivate cookieValue `shouldRespondWith` 403
+
+    it "accepts requests with old key and renews cookie" $ do
+      cookieValue <- getCookieValue loginRequest
+      getPrivate cookieValue `shouldRespondWith` 200
+
+      key <- head <$> extractKeys
+      addKey
+      newCookieValue <- getCookieValue (getPrivate cookieValue)
+
+      remKey key
+      getPrivate newCookieValue `shouldRespondWith` 200
+
+    it "does not renew cookies for the newest key" $ do
+      cookieValue <- getCookieValue loginRequest
+      _ <- getPrivate cookieValue `shouldRespondWith` 200
+      r <- getPrivate cookieValue
+      liftIO $ (lookup "set-cookie" $ simpleHeaders r) `shouldBe` Nothing
 
 
 #if MIN_VERSION_hspec_wai (0,7,0)
@@ -165,4 +229,29 @@ forgeCookies :: (ServerKeySet k)
   -> IO BS.ByteString
 forgeCookies ss newAuthSettings newServerKeySet r = extractSession ss r
   >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . wmData
+
+
+extractKeys :: WaiSession [BS.ByteString]
+extractKeys = (extractKeys' . BSL.toStrict . simpleBody) <$> get "/keys" where
+  del = '#'
+
+  (openTag, closeTag) = (id *** BS.drop 1) $ BSC8.span (/= del) $
+    BSL.toStrict . renderMarkup $
+      H.span H.! A.class_ "key" $ H.toHtml [del]
+
+  shrinkBy prefix = BS.drop . BS.length $ prefix
+
+  extractKeys' body = let
+    body' = snd $ BS.breakSubstring openTag body
+    (key, rest) = shrinkBy openTag *** shrinkBy closeTag $
+       BS.breakSubstring closeTag body'
+    in if BS.null body'
+       then []
+       else key:(extractKeys' rest)
+
+addKey :: WaiSession ()
+addKey = void $ get "/keys/add"
+
+remKey :: BS.ByteString -> WaiSession ()
+remKey key = void $ get $ "/keys/rem/" <> (urlEncode True $ key)
 
