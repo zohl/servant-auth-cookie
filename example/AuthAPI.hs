@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE OverloadedLists       #-}
+{-# LANGUAGE TupleSections         #-}
 
 module AuthAPI (
   ExampleAPI
@@ -16,12 +17,17 @@ module AuthAPI (
 , LoginForm(..)
 , homePage
 , loginPage
+, ExampleKeySet
+, mkExampleKeySet
 ) where
 
 import Prelude ()
 import Prelude.Compat
 import Control.Monad.Catch (catch)
 import Control.Monad
+import Control.Arrow((&&&))
+import Control.Monad.IO.Class (liftIO)
+import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.ByteString.Lazy (fromStrict)
 import Data.Default (def)
 import Data.List (find)
@@ -119,8 +125,35 @@ instance ToFormUrlEncoded LoginForm where
 #endif
 
 ----------------------------------------------------------------------------
--- API of the example
+-- KeySet
 
+-- | Custom instance of ServerKeySet, that creates a new key on every update.
+data ExampleKeySet = ExampleKeySet
+  { eksKeys    :: IORef [ServerKey]
+  , eksMaxKeys :: Int
+  , eksKeySize :: Int
+  }
+
+instance ServerKeySet ExampleKeySet where
+  getKeys k = liftIO $ (head &&& tail) <$> readIORef (eksKeys k)
+
+  updateKeys k = liftIO $ do
+    key <- generateRandomBytes (eksKeySize k)
+    atomicModifyIORef' (eksKeys k) $ (,()) . take (eksMaxKeys k) . (key:)
+
+  removeKey k key = liftIO $
+    atomicModifyIORef' (eksKeys k) $ (,()) . filter (/= key)
+
+
+mkExampleKeySet :: Int -> Int -> IO ExampleKeySet
+mkExampleKeySet eksMaxKeys eksKeySize = do
+  eksKeys <- newIORef []
+  let result = ExampleKeySet {..}
+  updateKeys result
+  return result
+
+----------------------------------------------------------------------------
+-- API of the example
 
 -- | Interface
 type ExampleAPI =

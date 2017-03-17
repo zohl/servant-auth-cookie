@@ -38,6 +38,7 @@ module Servant.Server.Experimental.Auth.Cookie
   , RandomSource
   , mkRandomSource
   , getRandomBytes
+  , generateRandomBytes
 
   , ServerKey
   , ServerKeySet (..)
@@ -73,7 +74,7 @@ module Servant.Server.Experimental.Auth.Cookie
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
-import Control.Arrow ((&&&), (***))
+import Control.Arrow ((&&&), (***), first)
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
@@ -110,6 +111,8 @@ import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8  as BSC8
 import qualified Servant.API.Header as S(Header)
 import qualified Network.HTTP.Types as N(Header)
+
+import Debug.Trace
 
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative
@@ -232,127 +235,76 @@ getRandomBytes (RandomSource mkDRG threshold ref) n = do
          then ((freshDRG, 0), result)
          else ((drg', bytes'), result)
 
-{-
 ----------------------------------------------------------------------------
 -- Server key
-
--- | A mutable state of ServerKey.
-data ServerKeyState = ServerKeyState
-  { sksBytes :: ByteString
-    -- ^ Current value of the key
-  , sksExpirationTime :: UTCTime
-    -- ^ When the key is expires
-  }
-
--- | A wrapper of self-resetting 'ByteString' of random symbols suitable for
--- concurrent usage.
-data ServerKey = ServerKey
-  { skSize :: Int
-    -- ^ Size of the key (in bytes)
-  , skMaxAge :: Maybe NominalDiffTime
-    -- ^ Expiration time ('Nothing' is enternity)
-  , skState :: IORef ServerKeyState
-    -- ^ Mutable state of the key
-  }
-
--- | Constructor for 'ServerKey' value.
-mkServerKey :: MonadIO m
-  => Int               -- ^ Size of the server key
-  -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
-  -> m ServerKey       -- ^ New 'ServerKey'
-mkServerKey skSize skMaxAge = liftIO $ do
-  skState <- mkServerKeyState skSize skMaxAge >>= newIORef
-  return ServerKey {..}
-
--- | Constructor for 'ServerKey' value using predefined key.
-mkServerKeyFromBytes :: MonadIO m
-  => ByteString     -- ^ Predefined key
-  -> m ServerKey    -- ^ New 'ServerKey'
-mkServerKeyFromBytes bytes = liftIO $ do
-  let skSize = BS.length bytes
-  let skMaxAge = Nothing
-  skState <- newIORef ServerKeyState
-    { sksBytes = bytes
-    , sksExpirationTime = UTCTime (toEnum 0) 0
-      -- we don't care about the time as the key never expires
-    }
-  return ServerKey {..}
-
--- | Extract value from 'ServerKey'.
-getServerKey :: MonadIO m
-  => ServerKey         -- ^ The 'ServerKey'
-  -> m ByteString      -- ^ Its random symbol
-getServerKey ServerKey {..} = liftIO $ maybe
-  (sksBytes <$> readIORef skState)
-  (\_ -> do
-    currentTime <- getCurrentTime
-    state <- readIORef skState
-    case (currentTime > sksExpirationTime state) of
-      False -> return $ sksBytes state
-      True  -> do
-        state' <- mkServerKeyState skSize skMaxAge
-        atomicModifyIORef' skState $ \state'' -> id &&& sksBytes $
-          if (sksBytes state == sksBytes state'') then state' else state'')
-  skMaxAge
-
--- | An initializer of 'ServerKey' state.
-mkServerKeyState
-  :: Int                   -- ^ Size of the server key
-  -> Maybe NominalDiffTime -- ^ Expiration time ('Nothing' is eternity)
-  -> IO ServerKeyState
-mkServerKeyState skSize skMaxAge = do
-  sksBytes  <- fst . randomBytesGenerate skSize <$> drgNew
-  sksExpirationTime <- addUTCTime (fromMaybe 0 skMaxAge) <$> getCurrentTime
-  return ServerKeyState {..}
-
--}
 
 type ServerKey = ByteString
 
 class ServerKeySet k where
-  getKeys :: (MonadThrow m, MonadIO m) => k -> m (ServerKey, [ServerKey])
+  getKeys    :: (MonadThrow m, MonadIO m) => k -> m (ServerKey, [ServerKey])
   updateKeys :: (MonadThrow m, MonadIO m) => k -> m ()
-  removeKey :: (MonadThrow m, MonadIO m) => k -> ServerKey -> m ()
+  removeKey  :: (MonadThrow m, MonadIO m) => k -> ServerKey -> m ()
 
-
+-- | A keyset containing only one key, that doesn't change.
 data PersistentServerKey = PersistentServerKey
   { pskBytes :: ServerKey }
-
-mkPersistentServerKey :: ByteString -> PersistentServerKey
-mkPersistentServerKey bytes = PersistentServerKey { pskBytes = bytes }
-
 
 instance ServerKeySet PersistentServerKey where
   getKeys = return . (,[]) . pskBytes
   updateKeys = const . return $ ()
   removeKey _ = const . return $ ()
 
+-- | Create instance of 'PersistentServerKey'.
+mkPersistentServerKey :: ByteString -> PersistentServerKey
+mkPersistentServerKey bytes = PersistentServerKey { pskBytes = bytes }
 
+
+-- | A keyset that renew rotate it's keys after specific time interval.
 data RenewableKeySet = RenewableKeySet {
-    rskKeys    :: IORef [ServerKey]
-  , rskMaxKeys :: Int
-  , rskKeySize :: Int
+    rksKeys     :: IORef ([ServerKey], UTCTime)
+  , rksMaxKeys  :: Int
+  , rksKeySize  :: Int
+  , rksLifetime :: NominalDiffTime
   }
 
 instance ServerKeySet RenewableKeySet where
-  getKeys k = liftIO $ (head &&& tail) <$> readIORef (rskKeys k)
+  getKeys k = let
+    getState = readIORef . rksKeys $ k
+    toResult = (head &&& tail) . fst
+    expirationTime = snd
+    in liftIO $ do
+      currentTime <- getCurrentTime
+      state       <- getState
+      if currentTime < (expirationTime state)
+      then return $ toResult state
+      else do
+        state' <- (,(rksLifetime k) `addUTCTime` currentTime)
+                . take (rksMaxKeys k)
+                . (:(fst state))
+              <$> generateRandomBytes (rksKeySize k)
 
-  updateKeys k = liftIO $ do
-    key <- (fst . randomBytesGenerate (rskKeySize k) <$> drgNew)
-    atomicModifyIORef' (rskKeys k) $ (,()) . take (rskMaxKeys k) . (key:)
+        atomicModifyIORef' (rksKeys k) $ \state'' -> id &&& toResult $
+          if (expirationTime state == expirationTime state'')
+          then state'
+          else state''
+
+  updateKeys k = error "Not implemented"
 
   removeKey k key = liftIO $
-    atomicModifyIORef' (rskKeys k) $ (,()) . filter (/= key)
+    atomicModifyIORef' (rksKeys k) $ (,()) . first (filter (/= key))
 
 
-mkRenewableKeySet :: Int -> Int -> IO RenewableKeySet
-mkRenewableKeySet rskMaxKeys rskKeySize = do
-  rskKeys <- newIORef []
+-- | Create instance of 'mkRenewableKeySet'.
+mkRenewableKeySet
+  :: Int
+  -> Int
+  -> NominalDiffTime
+  -> [ServerKey]
+  -> IO RenewableKeySet
+mkRenewableKeySet rksMaxKeys rksKeySize rksLifetime keys = do
+  rksKeys <- newIORef (keys, UTCTime (toEnum 0) 0)
   let result = RenewableKeySet {..}
-  updateKeys result
   return result
-
-
 
 ----------------------------------------------------------------------------
 -- Settings
@@ -524,7 +476,7 @@ decryptSession acs@AuthCookieSettings {..} sks s =
   in fromRight (base64Decode s) >>=
      decryptCookie acs sks      >>=
      \w -> do
-        session <- fromRight . runGet get . cookiePayload $ wmData w 
+        session <- fromRight . runGet get . cookiePayload $ wmData w
         return w { wmData = session }
 
 ----------------------------------------------------------------------------
@@ -724,4 +676,8 @@ applyCipherAlgorithm f ivRaw keyRaw msg = do
 
 unProxy :: Proxy a -> a
 unProxy Proxy = undefined
+
+-- | Generates random sequence of bytes from new DRG
+generateRandomBytes :: Int -> IO ByteString
+generateRandomBytes size = (fst . randomBytesGenerate size <$> drgNew)
 

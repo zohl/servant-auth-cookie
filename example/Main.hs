@@ -19,6 +19,7 @@ main :: IO ()
 main = do
   rs <- mkRandomSource drgNew 1000
   -- let sks = PersistentServerKey "123456789abcdef"
-  sks <- mkRenewableKeySet 4 16
+  sks <- mkExampleKeySet 4 16
+  -- sks <- mkRenewableKeySet 8 16 4 []
   run 8080 (app authSettings rs sks)
 
