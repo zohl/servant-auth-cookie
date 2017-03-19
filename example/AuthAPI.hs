@@ -11,25 +11,26 @@
 
 module AuthAPI (
   ExampleAPI
-, Account(..)
+, Account (..)
 , app
 , authSettings
-, LoginForm(..)
+, LoginForm (..)
 , homePage
 , loginPage
-, ExampleKeySet
-, mkExampleKeySet
+, FileKSParams (..)
+, mkFileKeySet
 ) where
 
 import Prelude ()
 import Prelude.Compat
-import Control.Monad.Catch (catch)
+import Control.Monad.Catch (MonadThrow, catch)
 import Control.Monad
 import Control.Arrow((&&&))
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Time.Clock (UTCTime(..))
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.ByteString.Lazy (fromStrict)
-import Data.Default (def)
+import Data.Default (Default, def)
 import Data.List (find)
 import Data.Serialize (Serialize)
 import GHC.Generics
@@ -42,11 +43,13 @@ import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
 import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
 import Servant.Server.Experimental.Auth.Cookie
+import System.Directory (doesFileExist, getModificationTime)
 import Text.Blaze.Html5 ((!), Markup)
 import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC8
 
 #if MIN_VERSION_servant (0,9,0)
@@ -126,7 +129,7 @@ instance ToFormUrlEncoded LoginForm where
 
 ----------------------------------------------------------------------------
 -- KeySet
-
+{-
 -- | Custom instance of ServerKeySet, that creates a new key on every update.
 data ExampleKeySet = ExampleKeySet
   { eksKeys    :: IORef [ServerKey]
@@ -151,6 +154,53 @@ mkExampleKeySet eksMaxKeys eksKeySize = do
   let result = ExampleKeySet {..}
   updateKeys result
   return result
+
+----
+-}
+
+data FileKSParams = FileKSParams
+  { fkspPath    :: FilePath
+  , fkspMaxKeys :: Int
+  , fkspKeySize :: Int
+  }
+
+data FileKSState = FileKSState
+  { fkssLastModified :: UTCTime } deriving Eq
+
+
+mkFileKeySet :: (MonadIO m, MonadThrow m)
+  => FileKSParams
+  -> m (RenewableKeySet FileKSState FileKSParams)
+mkFileKeySet = mkKeySet where
+
+  mkKeySet FileKSParams {..} = do
+
+    liftIO $ do
+      doesFileExist fkspPath >>= \exists -> when (not exists) $ do
+        key <- generateRandomBytes fkspKeySize
+        writeFile fkspPath $ BSC8.unpack . Base64.encode $ key
+
+    let fkssLastModified = UTCTime (toEnum 0) 0
+
+    mkRenewableKeySet
+      RenewableKeySetHooks {..}
+      FileKSParams {..}
+      FileKSState {..}
+
+  rkshNeedUpdate FileKSParams {..} (_, FileKSState {..}) = do
+    lastModified <- liftIO $ getModificationTime fkspPath
+    return (lastModified > fkssLastModified)
+
+  rkshNewState FileKSParams {..} (_, s) = liftIO $ do
+    lastModified <- getModificationTime fkspPath
+    keys <- map (either (error "wrong key format") id . Base64.decode . BSC8.pack)
+          . take fkspMaxKeys . reverse . lines
+        <$> readFile fkspPath
+    return (keys, s {fkssLastModified = lastModified})
+
+
+  -- rkshRemoveKey FileKSParams {..} (keys, s) key =
+  --   when (not . null . filter (== key) $ keys) $ do
 
 ----------------------------------------------------------------------------
 -- API of the example
@@ -205,18 +255,21 @@ server settings rs sks = serveHome
 
   servePrivate (Account uid u p) = privatePage uid u p
 
-  serveKeys = (keysPage <$> getKeys sks) :<|> addKey :<|> remKey
+  serveKeys = (keysPage <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey
 
-  addKey = do
-    updateKeys sks
-    return $ redirectPage "/keys" "New key was added"
+  serveAddKey = return undefined
+  -- do
+  --   updateKeys sks
+  --   return $ redirectPage "/keys" "New key was added"
 
-  remKey b64key = either
-    (\err -> throwError err403 { errBody = fromStrict . BSC8.pack $ err })
-    (\key -> do
-      removeKey sks key
-      return $ redirectPage "/keys" "The key was removed")
-    (Base64.decode . BSC8.pack $ b64key)
+  serveRemKey b64key = return undefined
+  -- either
+  --   (\err -> throwError err403 { errBody = fromStrict . BSC8.pack $ err })
+  --   (\key -> do
+  --     removeKey sks key
+  --     return $ redirectPage "/keys" "The key was removed")
+  --   (Base64.decode . BSC8.pack $ b64key)
+
 
 -- | Custom handler that bluntly reports any occurred errors.
 authHandler :: (ServerKeySet s)

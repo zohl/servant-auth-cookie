@@ -8,11 +8,12 @@ import Prelude.Compat
 import Control.Arrow ((***))
 import Control.Monad (void)
 import Data.Monoid ((<>))
+import Data.Default (def)
 import Data.Maybe (fromMaybe)
 import Data.Int (Int64)
 import Data.Time.Clock (UTCTime(..))
 import Control.Monad.IO.Class (liftIO)
-import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..), mkExampleKeySet)
+import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..), mkFileKeySet, FileKSParams(..))
 import Test.Hspec (Spec, hspec, describe, context, it, shouldBe, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, WaiExpectation, shouldRespondWith, with, request, get)
 import Text.Blaze.Renderer.Utf8 (renderMarkup)
@@ -59,7 +60,10 @@ main = do
     mkPersistentServerKey "0123456789abcdef"
 
   hspec . renewalSpec . SpecState rs authSettings
-    =<< mkExampleKeySet 3 16
+    =<< mkFileKeySet FileKSParams
+    { fkspMaxKeys = 3
+    , fkspKeySize = 16
+    , fkspPath = "./test-key-set" }
 
 
 basicSpec :: SpecState -> Spec

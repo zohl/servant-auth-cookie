@@ -23,6 +23,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE RankNTypes          #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 module Servant.Server.Experimental.Auth.Cookie
@@ -47,6 +48,7 @@ module Servant.Server.Experimental.Auth.Cookie
   , mkPersistentServerKey
 
   , RenewableKeySet
+  , RenewableKeySetHooks (..)
   , mkRenewableKeySet
 
   , AuthCookieSettings (..)
@@ -88,6 +90,7 @@ import Crypto.Random (DRG(..), drgNew)
 import Data.ByteString (ByteString)
 import Data.Default
 import Data.IORef
+import Data.List (partition)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
@@ -241,70 +244,80 @@ getRandomBytes (RandomSource mkDRG threshold ref) n = do
 type ServerKey = ByteString
 
 class ServerKeySet k where
-  getKeys    :: (MonadThrow m, MonadIO m) => k -> m (ServerKey, [ServerKey])
-  updateKeys :: (MonadThrow m, MonadIO m) => k -> m ()
-  removeKey  :: (MonadThrow m, MonadIO m) => k -> ServerKey -> m ()
+  getKeys   :: (MonadThrow m, MonadIO m) => k -> m (ServerKey, [ServerKey])
+  removeKey :: (MonadThrow m, MonadIO m) => k -> ServerKey -> m ()
 
 -- | A keyset containing only one key, that doesn't change.
 data PersistentServerKey = PersistentServerKey
   { pskBytes :: ServerKey }
 
 instance ServerKeySet PersistentServerKey where
-  getKeys = return . (,[]) . pskBytes
-  updateKeys = const . return $ ()
-  removeKey _ = const . return $ ()
+  getKeys     = return . (,[]) . pskBytes
+  removeKey _ = error "TODO: Not implemented"
 
 -- | Create instance of 'PersistentServerKey'.
 mkPersistentServerKey :: ByteString -> PersistentServerKey
 mkPersistentServerKey bytes = PersistentServerKey { pskBytes = bytes }
 
 
--- | A keyset that renew rotate it's keys after specific time interval.
-data RenewableKeySet = RenewableKeySet {
-    rksKeys     :: IORef ([ServerKey], UTCTime)
-  , rksMaxKeys  :: Int
-  , rksKeySize  :: Int
-  , rksLifetime :: NominalDiffTime
+
+data RenewableKeySetHooks s p = RenewableKeySetHooks
+  { rkshNewState :: forall m. (MonadIO m, MonadThrow m)
+    => p
+    -> ([ServerKey], s)
+    -> m ([ServerKey], s)
+
+  , rkshNeedUpdate :: forall m. (MonadIO m, MonadThrow m)
+    => p
+    -> ([ServerKey], s)
+    -> m Bool
+
+  , rkshRemoveKey :: forall m. (MonadIO m, MonadThrow m)
+    => p
+    -> ([ServerKey], s)
+    -> ServerKey
+    -> m s
   }
 
-instance ServerKeySet RenewableKeySet where
-  getKeys k = let
-    getState = readIORef . rksKeys $ k
+data RenewableKeySet s p = RenewableKeySet
+  { rksState      :: IORef ([ServerKey], s)
+  , rksParameters :: p
+  , rksHooks      :: RenewableKeySetHooks s p
+  }
+
+instance (Eq s) => ServerKeySet (RenewableKeySet s p) where
+  getKeys RenewableKeySet {..} = getKeys' rksHooks where
+    getKeys' RenewableKeySetHooks {..} = do
+      state <- liftIO $ readIORef rksState
+      rkshNeedUpdate rksParameters state
+        >>= \needUpdate -> if not needUpdate
+          then return $ toResult state
+          else do
+            state' <- rkshNewState rksParameters state
+            liftIO $ atomicModifyIORef' rksState $ \state'' -> id &&& toResult $
+              if (userState state /= userState state'')
+              then state''
+              else state'
     toResult = (head &&& tail) . fst
-    expirationTime = snd
-    in liftIO $ do
-      currentTime <- getCurrentTime
-      state       <- getState
-      if currentTime < (expirationTime state)
-      then return $ toResult state
-      else do
-        state' <- (,(rksLifetime k) `addUTCTime` currentTime)
-                . take (rksMaxKeys k)
-                . (:(fst state))
-              <$> generateRandomBytes (rksKeySize k)
+    userState = snd
 
-        atomicModifyIORef' (rksKeys k) $ \state'' -> id &&& toResult $
-          if (expirationTime state == expirationTime state'')
-          then state'
-          else state''
+  removeKey RenewableKeySet {..} key = do
+    found <- liftIO $ atomicModifyIORef' rksState $ \state -> let
+      (keys, userState) = state
+      in (,userState) *** (not . null) $ partition (/= key) keys
+    -- when found $ do
+    --   rkshRemoveKey rksParameters rksState key
+    return ()
 
-  updateKeys k = error "Not implemented"
+mkRenewableKeySet :: (MonadIO m, MonadThrow m)
+  => RenewableKeySetHooks s p
+  -> p
+  -> s
+  -> m (RenewableKeySet s p)
+mkRenewableKeySet rksHooks rksParameters userState = liftIO $ do
+  rksState <- newIORef ([], userState)
+  return RenewableKeySet {..}
 
-  removeKey k key = liftIO $
-    atomicModifyIORef' (rksKeys k) $ (,()) . first (filter (/= key))
-
-
--- | Create instance of 'mkRenewableKeySet'.
-mkRenewableKeySet
-  :: Int
-  -> Int
-  -> NominalDiffTime
-  -> [ServerKey]
-  -> IO RenewableKeySet
-mkRenewableKeySet rksMaxKeys rksKeySize rksLifetime keys = do
-  rksKeys <- newIORef (keys, UTCTime (toEnum 0) 0)
-  let result = RenewableKeySet {..}
-  return result
 
 ----------------------------------------------------------------------------
 -- Settings
