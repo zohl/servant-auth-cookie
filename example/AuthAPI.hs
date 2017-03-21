@@ -18,6 +18,7 @@ module AuthAPI (
 , homePage
 , loginPage
 , FileKSParams (..)
+, mkFileKey
 , mkFileKeySet
 ) where
 
@@ -27,11 +28,12 @@ import Control.Monad.Catch (MonadThrow, catch)
 import Control.Monad
 import Control.Arrow((&&&))
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Time.Clock (UTCTime(..))
+import Data.Time.Clock (UTCTime(..), getCurrentTime)
+import Data.Time (formatTime, defaultTimeLocale)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.ByteString.Lazy (fromStrict)
 import Data.Default (Default, def)
-import Data.List (find)
+import Data.List (find, sort)
 import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
@@ -43,7 +45,8 @@ import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
 import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
 import Servant.Server.Experimental.Auth.Cookie
-import System.Directory (doesFileExist, getModificationTime)
+import System.Directory (doesFileExist, getModificationTime, createDirectoryIfMissing, listDirectory, removeFile)
+import System.FilePath.Posix ((</>), (<.>))
 import Text.Blaze.Html5 ((!), Markup)
 import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
@@ -51,6 +54,8 @@ import qualified Text.Blaze.Html5.Attributes as A
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC8
+
+import Debug.Trace
 
 #if MIN_VERSION_servant (0,9,0)
 import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
@@ -129,34 +134,6 @@ instance ToFormUrlEncoded LoginForm where
 
 ----------------------------------------------------------------------------
 -- KeySet
-{-
--- | Custom instance of ServerKeySet, that creates a new key on every update.
-data ExampleKeySet = ExampleKeySet
-  { eksKeys    :: IORef [ServerKey]
-  , eksMaxKeys :: Int
-  , eksKeySize :: Int
-  }
-
-instance ServerKeySet ExampleKeySet where
-  getKeys k = liftIO $ (head &&& tail) <$> readIORef (eksKeys k)
-
-  updateKeys k = liftIO $ do
-    key <- generateRandomBytes (eksKeySize k)
-    atomicModifyIORef' (eksKeys k) $ (,()) . take (eksMaxKeys k) . (key:)
-
-  removeKey k key = liftIO $
-    atomicModifyIORef' (eksKeys k) $ (,()) . filter (/= key)
-
-
-mkExampleKeySet :: Int -> Int -> IO ExampleKeySet
-mkExampleKeySet eksMaxKeys eksKeySize = do
-  eksKeys <- newIORef []
-  let result = ExampleKeySet {..}
-  updateKeys result
-  return result
-
-----
--}
 
 data FileKSParams = FileKSParams
   { fkspPath    :: FilePath
@@ -168,17 +145,28 @@ data FileKSState = FileKSState
   { fkssLastModified :: UTCTime } deriving Eq
 
 
+mkFileKey :: FileKSParams -> IO ()
+mkFileKey FileKSParams {..} = do
+  key <- generateRandomBytes fkspKeySize >>= return
+       . BSC8.unpack
+       . Base64.encode
+  name <- getCurrentTime >>= return
+        . (fkspPath </>)
+        . (<.> "b64")
+        . formatTime defaultTimeLocale (acsExpirationFormat def)
+  writeFile name key
+
+
 mkFileKeySet :: (MonadIO m, MonadThrow m)
   => FileKSParams
   -> m (RenewableKeySet FileKSState FileKSParams)
 mkFileKeySet = mkKeySet where
 
   mkKeySet FileKSParams {..} = do
-
     liftIO $ do
-      doesFileExist fkspPath >>= \exists -> when (not exists) $ do
-        key <- generateRandomBytes fkspKeySize
-        writeFile fkspPath $ BSC8.unpack . Base64.encode $ key
+      createDirectoryIfMissing True fkspPath
+      listDirectory fkspPath >>= \fs -> when (null fs) $
+        mkFileKey FileKSParams {..}
 
     let fkssLastModified = UTCTime (toEnum 0) 0
 
@@ -191,16 +179,26 @@ mkFileKeySet = mkKeySet where
     lastModified <- liftIO $ getModificationTime fkspPath
     return (lastModified > fkssLastModified)
 
+  getLastModifiedFiles FileKSParams {..} = listDirectory fkspPath
+    >>= return . map (fkspPath </>)
+    >>= \fs -> zip <$> (mapM getModificationTime fs) <*> (return fs)
+    >>= return
+      . map snd
+      . take fkspMaxKeys
+      . reverse
+      . sort
+
+  readKey = fmap (either (error "wrong key format") id . Base64.decode . BSC8.pack) . readFile
+
   rkshNewState FileKSParams {..} (_, s) = liftIO $ do
     lastModified <- getModificationTime fkspPath
-    keys <- map (either (error "wrong key format") id . Base64.decode . BSC8.pack)
-          . take fkspMaxKeys . reverse . lines
-        <$> readFile fkspPath
+    keys <- getLastModifiedFiles FileKSParams {..} >>= mapM readKey
     return (keys, s {fkssLastModified = lastModified})
 
-
-  -- rkshRemoveKey FileKSParams {..} (keys, s) key =
-  --   when (not . null . filter (== key) $ keys) $ do
+  rkshRemoveKey FileKSParams {..} key = liftIO $ getLastModifiedFiles FileKSParams {..}
+    >>= \fs -> zip fs <$> mapM readKey fs
+    >>= return . filter ((== key) . snd)
+    >>= mapM_ (removeFile . fst)
 
 ----------------------------------------------------------------------------
 -- API of the example
@@ -220,10 +218,11 @@ type ExampleAPI =
 -- | Implementation
 server :: (ServerKeySet s)
   => AuthCookieSettings
+  -> (IO ())
   -> RandomSource
   -> s
   -> Server ExampleAPI
-server settings rs sks = serveHome
+server settings generateKey rs sks = serveHome
     :<|> serveLogin
     :<|> serveLoginPost
     :<|> serveLogout
@@ -257,18 +256,16 @@ server settings rs sks = serveHome
 
   serveKeys = (keysPage <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey
 
-  serveAddKey = return undefined
-  -- do
-  --   updateKeys sks
-  --   return $ redirectPage "/keys" "New key was added"
+  serveAddKey = do
+    liftIO $ generateKey
+    return $ redirectPage "/keys" "New key was added"
 
-  serveRemKey b64key = return undefined
-  -- either
-  --   (\err -> throwError err403 { errBody = fromStrict . BSC8.pack $ err })
-  --   (\key -> do
-  --     removeKey sks key
-  --     return $ redirectPage "/keys" "The key was removed")
-  --   (Base64.decode . BSC8.pack $ b64key)
+  serveRemKey b64key = either
+    (\err -> throwError err403 { errBody = fromStrict . BSC8.pack $ err })
+    (\key -> do
+      removeKey sks key
+      return $ redirectPage "/keys" "The key was removed")
+    (Base64.decode . BSC8.pack $ b64key)
 
 
 -- | Custom handler that bluntly reports any occurred errors.
@@ -293,11 +290,16 @@ authSettings :: AuthCookieSettings
 authSettings = def {acsCookieFlags = ["HttpOnly"]}
 
 -- | Application
-app :: (ServerKeySet s) => AuthCookieSettings -> RandomSource -> s -> Application
-app settings rs sks = serveWithContext
+app :: (ServerKeySet s)
+  => AuthCookieSettings
+  -> (IO ())
+  -> RandomSource
+  -> s
+  -> Application
+app settings generateKey rs sks = serveWithContext
   (Proxy :: Proxy ExampleAPI)
   ((authHandler settings sks) :. EmptyContext)
-  (server settings rs sks)
+  (server settings generateKey rs sks)
 
 
 ----------------------------------------------------------------------------
