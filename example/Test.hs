@@ -2,11 +2,13 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TupleSections #-}
 
 import Prelude ()
 import Prelude.Compat
 import Control.Arrow ((***))
 import Control.Concurrent (threadDelay)
+import Control.Exception.Base (bracket)
 import Control.Monad (void, when)
 import Data.Monoid ((<>))
 import Data.Default (def)
@@ -35,7 +37,7 @@ import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 
 import System.Directory (listDirectory)
-import Debug.Trace
+import Data.Time.Clock (getCurrentTime)
 
 #if MIN_VERSION_hspec_wai (0,7,0)
 import Test.Hspec.Wai.Matcher (bodyEquals, ResponseMatcher(..), MatchBody(..))
@@ -58,6 +60,7 @@ data SpecState where
     , ssGenerateKey  :: IO ()
     } -> SpecState
 
+
 main :: IO ()
 main = do
   rs <- mkRandomSource drgNew 1000
@@ -69,21 +72,29 @@ main = do
     , ssGenerateKey  = return ()
     } >>= hspec . basicSpec
 
-  let keySetDir = "./test-key-set"
-  doesDirectoryExist keySetDir
-    >>= \exists -> when exists $ removeDirectoryRecursive keySetDir
 
-  return FileKSParams
-    { fkspMaxKeys = 3
-    , fkspKeySize = 16
-    , fkspPath = keySetDir
-    } >>= \fksp -> mkFileKeySet fksp
-      >>= \ks -> return SpecState
-        { ssRandomSource = rs
-        , ssAuthSettings = authSettings
-        , ssServerKeySet = ks
-        , ssGenerateKey  = mkFileKey fksp
-        } >>= hspec . renewalSpec
+  let keySetDir = "./test-key-set"
+  let rmDir name = doesDirectoryExist keySetDir
+        >>= \exists -> when exists $ removeDirectoryRecursive keySetDir
+
+  bracket
+    (do
+       let keySetDir = "./test-key-set"
+       rmDir keySetDir
+       return FileKSParams
+         { fkspMaxKeys = 3
+         , fkspKeySize = 16
+         , fkspPath = keySetDir
+         } >>= \fksp -> (fksp,) <$> mkFileKeySet fksp)
+
+    (rmDir . fkspPath . fst)
+
+    (\(fksp, ks) -> hspec . renewalSpec $ SpecState
+         { ssRandomSource = rs
+         , ssAuthSettings = authSettings
+         , ssServerKeySet = ks
+         , ssGenerateKey  = mkFileKey fksp
+         })
 
 
 basicSpec :: SpecState -> Spec
@@ -154,44 +165,44 @@ renewalSpec ss@(SpecState {..}) = describe "renewal functionality" $ with
       keys' <- extractKeys
       liftIO $ keys `shouldBe` (tail keys')
 
---    it "removes a key" $ do
---      keys <- extractKeys
---      remKey $ last keys
---      keys' <- extractKeys
---      liftIO $ keys' `shouldBe` (init keys)
---
---  context "cookies" $ do
---    let loginRequest = login "mr_foo" "password1"
---
---    let getCookieValue req = req >>= \resp -> return $ fromMaybe
---          (error "cookies aren't available")
---          (lookup "set-cookie" $ simpleHeaders resp)
---
---    it "rejects requests with deleted keys" $ do
---      cookieValue <- getCookieValue loginRequest
---      getPrivate cookieValue `shouldRespondWith` 200
---
---      key <- head <$> extractKeys
---      addKey >> remKey key
---
---      getPrivate cookieValue `shouldRespondWith` 403
---
---    it "accepts requests with old key and renews cookie" $ do
---      cookieValue <- getCookieValue loginRequest
---      getPrivate cookieValue `shouldRespondWith` 200
---
---      key <- head <$> extractKeys
---      addKey
---      newCookieValue <- getCookieValue (getPrivate cookieValue)
---
---      remKey key
---      getPrivate newCookieValue `shouldRespondWith` 200
---
---    it "does not renew cookies for the newest key" $ do
---      cookieValue <- getCookieValue loginRequest
---      _ <- getPrivate cookieValue `shouldRespondWith` 200
---      r <- getPrivate cookieValue
---      liftIO $ (lookup "set-cookie" $ simpleHeaders r) `shouldBe` Nothing
+    it "removes a key" $ do
+      keys <- extractKeys
+      remKey $ last keys
+      keys' <- extractKeys
+      liftIO $ keys' `shouldBe` (init keys)
+
+  context "cookies" $ do
+    let loginRequest = login "mr_foo" "password1"
+
+    let getCookieValue req = req >>= \resp -> return $ fromMaybe
+          (error "cookies aren't available")
+          (lookup "set-cookie" $ simpleHeaders resp)
+
+    it "rejects requests with deleted keys" $ do
+      cookieValue <- getCookieValue loginRequest
+      getPrivate cookieValue `shouldRespondWith` 200
+
+      key <- head <$> extractKeys
+      addKey >> remKey key
+
+      getPrivate cookieValue `shouldRespondWith` 403
+
+    it "accepts requests with old key and renews cookie" $ do
+      cookieValue <- getCookieValue loginRequest
+      getPrivate cookieValue `shouldRespondWith` 200
+
+      key <- head <$> extractKeys
+      addKey
+      newCookieValue <- getCookieValue (getPrivate cookieValue)
+
+      remKey key
+      getPrivate newCookieValue `shouldRespondWith` 200
+
+    it "does not renew cookies for the newest key" $ do
+      cookieValue <- getCookieValue loginRequest
+      _ <- getPrivate cookieValue `shouldRespondWith` 200
+      r <- getPrivate cookieValue
+      liftIO $ (lookup "set-cookie" $ simpleHeaders r) `shouldBe` Nothing
 
 
 #if MIN_VERSION_hspec_wai (0,7,0)

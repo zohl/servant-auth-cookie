@@ -115,8 +115,6 @@ import qualified Data.ByteString.Char8  as BSC8
 import qualified Servant.API.Header as S(Header)
 import qualified Network.HTTP.Types as N(Header)
 
-import Debug.Trace
-
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative
 #endif

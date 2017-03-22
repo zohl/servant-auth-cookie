@@ -26,6 +26,7 @@ import Prelude ()
 import Prelude.Compat
 import Control.Monad.Catch (MonadThrow, catch)
 import Control.Monad
+import Control.Concurrent (threadDelay)
 import Control.Arrow((&&&))
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Time.Clock (UTCTime(..), getCurrentTime)
@@ -54,8 +55,6 @@ import qualified Text.Blaze.Html5.Attributes as A
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC8
-
-import Debug.Trace
 
 #if MIN_VERSION_servant (0,9,0)
 import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
@@ -146,15 +145,23 @@ data FileKSState = FileKSState
 
 
 mkFileKey :: FileKSParams -> IO ()
-mkFileKey FileKSParams {..} = do
-  key <- generateRandomBytes fkspKeySize >>= return
-       . BSC8.unpack
-       . Base64.encode
-  name <- getCurrentTime >>= return
-        . (fkspPath </>)
-        . (<.> "b64")
-        . formatTime defaultTimeLocale (acsExpirationFormat def)
-  writeFile name key
+mkFileKey FileKSParams {..} = (,) <$> mkName <*> mkKey >>= uncurry writeFile where
+
+  mkKey = generateRandomBytes fkspKeySize
+    >>= return
+      . BSC8.unpack
+      . Base64.encode
+
+  mkName = getCurrentTime
+    >>= return
+      . (fkspPath </>)
+      . (<.> "b64")
+      . formatTime defaultTimeLocale (acsExpirationFormat def)
+    >>= \name -> do
+      exists <- doesFileExist name
+      if exists
+      then (threadDelay 1000000) >> mkName
+      else return name
 
 
 mkFileKeySet :: (MonadIO m, MonadThrow m)
