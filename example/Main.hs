@@ -1,17 +1,9 @@
-{-# LANGUAGE CPP                   #-}
-{-# LANGUAGE DataKinds             #-}
-{-# LANGUAGE DeriveGeneric         #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE RecordWildCards       #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Main (main) where
 import AuthAPI (app, authSettings, mkFileKeySet, FileKSParams(..), mkFileKey)
 import Prelude ()
 import Prelude.Compat
-import Data.Default (def)
 import Crypto.Random (drgNew)
 import Network.Wai.Handler.Warp (run)
 import Servant.Server.Experimental.Auth.Cookie

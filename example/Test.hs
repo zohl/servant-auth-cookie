@@ -7,11 +7,9 @@
 import Prelude ()
 import Prelude.Compat
 import Control.Arrow ((***))
-import Control.Concurrent (threadDelay)
 import Control.Exception.Base (bracket)
 import Control.Monad (void, when)
 import Data.Monoid ((<>))
-import Data.Default (def)
 import Data.Maybe (fromMaybe)
 import Data.Int (Int64)
 import Data.Time.Clock (UTCTime(..))
@@ -35,9 +33,6 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC8
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
-
-import System.Directory (listDirectory)
-import Data.Time.Clock (getCurrentTime)
 
 #if MIN_VERSION_hspec_wai (0,7,0)
 import Test.Hspec.Wai.Matcher (bodyEquals, ResponseMatcher(..), MatchBody(..))
@@ -73,9 +68,8 @@ main = do
     } >>= hspec . basicSpec
 
 
-  let keySetDir = "./test-key-set"
-  let rmDir name = doesDirectoryExist keySetDir
-        >>= \exists -> when exists $ removeDirectoryRecursive keySetDir
+  let rmDir name = doesDirectoryExist name
+        >>= \exists -> when exists $ removeDirectoryRecursive name
 
   bracket
     (do
@@ -151,7 +145,7 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
 
 
 renewalSpec :: SpecState -> Spec
-renewalSpec ss@(SpecState {..}) = describe "renewal functionality" $ with
+renewalSpec (SpecState {..}) = describe "renewal functionality" $ with
   (return $ app ssAuthSettings ssGenerateKey ssRandomSource ssServerKeySet) $ do
 
   context "keys" $ do

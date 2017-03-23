@@ -27,21 +27,19 @@ import Prelude.Compat
 import Control.Monad.Catch (MonadThrow, catch)
 import Control.Monad
 import Control.Concurrent (threadDelay)
-import Control.Arrow((&&&))
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Time.Clock (UTCTime(..), getCurrentTime)
 import Data.Time (formatTime, defaultTimeLocale)
-import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.ByteString.Lazy (fromStrict)
-import Data.Default (Default, def)
+import Data.Default (def)
 import Data.List (find, sort)
 import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application, Request)
-import Servant (Handler, ReqBody, FormUrlEncoded, Capture, noHeader)
+import Servant (Handler, ReqBody, FormUrlEncoded, Capture)
 import Servant ((:<|>)(..), (:>), errBody, throwError, err403, toQueryParam)
-import Servant (Post, Headers, Header, AuthProtect, Get, Server, Proxy)
+import Servant (Post, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
 import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
@@ -53,7 +51,6 @@ import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import qualified Data.ByteString.Base64 as Base64
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC8
 
 #if MIN_VERSION_servant (0,9,0)
@@ -133,6 +130,12 @@ instance ToFormUrlEncoded LoginForm where
 
 ----------------------------------------------------------------------------
 -- KeySet
+-- A custom implementation of a keyset on top of 'RenewableKeySet'.
+-- Keys are stored as files with base64 encoded data in 'test-key-set' directory.
+-- To add a key just throw a file into the directory.
+-- To remove a key delete corresponding file in the directory.
+-- Both operations can be performed via web interface (see '/keys' page).
+
 
 data FileKSParams = FileKSParams
   { fkspPath    :: FilePath
@@ -161,6 +164,7 @@ mkFileKey FileKSParams {..} = (,) <$> mkName <*> mkKey >>= uncurry writeFile whe
       exists <- doesFileExist name
       if exists
       then (threadDelay 1000000) >> mkName
+        -- ^ we don't want to change the keys that often
       else return name
 
 
@@ -258,7 +262,6 @@ server settings generateKey rs sks = serveHome
 
   serveLogout = removeSession settings (redirectPage "/" "Session has been terminated")
 
-
   servePrivate (Account uid u p) = privatePage uid u p
 
   serveKeys = (keysPage <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey
@@ -299,7 +302,7 @@ authSettings = def {acsCookieFlags = ["HttpOnly"]}
 -- | Application
 app :: (ServerKeySet s)
   => AuthCookieSettings
-  -> (IO ())
+  -> IO () -- ^ An action to create a new key
   -> RandomSource
   -> s
   -> Application

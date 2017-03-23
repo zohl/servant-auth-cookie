@@ -24,7 +24,6 @@
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE TypeFamilies        #-}
 {-# LANGUAGE RankNTypes          #-}
-{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 module Servant.Server.Experimental.Auth.Cookie
   ( CipherAlgorithm
@@ -76,7 +75,7 @@ module Servant.Server.Experimental.Auth.Cookie
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
-import Control.Arrow ((&&&), (***), first, second)
+import Control.Arrow ((&&&), first, second)
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
@@ -91,7 +90,7 @@ import Data.ByteString (ByteString)
 import Data.Default
 import Data.IORef
 import Data.List (partition)
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize
@@ -134,9 +133,10 @@ type CipherAlgorithm c = c -> IV c -> ByteString -> ByteString
 -- | A type family that maps user-defined data to 'AuthServerData'.
 type family AuthCookieData
 
+-- | Wrapper for cookies and sessions to keep some related metadata.
 data WithMetadata a = WithMetadata
-  { wmData  :: a
-  , wmRenew :: Bool
+  { wmData  :: a     -- ^ Value itself
+  , wmRenew :: Bool  -- ^ Whether we should renew cookies/session
   }
 
 type instance AuthServerData (AuthProtect "cookie-auth") = WithMetadata AuthCookieData
@@ -239,11 +239,17 @@ getRandomBytes (RandomSource mkDRG threshold ref) n = do
 ----------------------------------------------------------------------------
 -- Server key
 
+-- | Internal representation of a server key.
 type ServerKey = ByteString
 
+-- | Interface for a set of server keys.
 class ServerKeySet k where
   getKeys   :: (MonadThrow m, MonadIO m) => k -> m (ServerKey, [ServerKey])
+  -- ^ Retrieve current and rotated keys respectively.
+
   removeKey :: (MonadThrow m, MonadIO m) => k -> ServerKey -> m ()
+  -- ^ Non-graciously remove the key from a keyset.
+
 
 -- | A keyset containing only one key, that doesn't change.
 data PersistentServerKey = PersistentServerKey
@@ -258,28 +264,44 @@ mkPersistentServerKey :: ByteString -> PersistentServerKey
 mkPersistentServerKey bytes = PersistentServerKey { pskBytes = bytes }
 
 
-
+-- | Customizable actions for 'RenewableKeySet'.
 data RenewableKeySetHooks s p = RenewableKeySetHooks
   { rkshNewState :: forall m. (MonadIO m, MonadThrow m)
-    => p
-    -> ([ServerKey], s)
-    -> m ([ServerKey], s)
+    => p                  -- KeySet parameters
+    -> ([ServerKey], s)   -- Current state
+    -> m ([ServerKey], s) -- New state
+    -- ^ Called when a keyset needs to refresh it's state. It's result might be
+    -- discarded occasionally in favour of result yielded in another thread.
 
   , rkshNeedUpdate :: forall m. (MonadIO m, MonadThrow m)
-    => p
-    -> ([ServerKey], s)
-    -> m Bool
+    => p                 -- KeySet parameters
+    -> ([ServerKey], s)  -- Current state
+    -> m Bool            -- Whether to update the state
+    -- ^ Called before retrieving the keys and refreshing the state.
 
   , rkshRemoveKey :: forall m. (MonadIO m, MonadThrow m)
-    => p
-    -> ServerKey
-    -> m ()
+    => p          -- KeySet parameters
+    -> ServerKey  -- Key to remove
+    -> m ()       -- Action to perform
+    -- ^ Called after removing the key. This hook is called only if the key
+    -- belongs to a keyset and called once per key. The only purpose of it is
+    -- to clear the garbage after removing the key. The state might differs
+    -- after removing the key and before calling the hook, therefore the hook
+    -- doesn't rely on the state.
   }
 
+
+-- | Customizable key set, that provides partial implementation of
+-- 'ServerKeySet'.
 data RenewableKeySet s p = RenewableKeySet
   { rksState      :: IORef ([ServerKey], s)
+    -- ^ Key set state (keys and user-defined state).
+
   , rksParameters :: p
+    -- ^ User-defined parameters of the key set.
+
   , rksHooks      :: RenewableKeySetHooks s p
+    -- ^ USer-defined hooks of the key set.
   }
 
 instance (Eq s) => ServerKeySet (RenewableKeySet s p) where
@@ -304,10 +326,11 @@ instance (Eq s) => ServerKeySet (RenewableKeySet s p) where
       in (first (const keys') state, found)
     when found $ (rkshRemoveKey rksHooks) rksParameters key
 
-mkRenewableKeySet :: (MonadIO m, MonadThrow m)
-  => RenewableKeySetHooks s p
-  -> p
-  -> s
+-- | Create instance of 'RenewableKeySet'.
+mkRenewableKeySet :: (MonadIO m)
+  => RenewableKeySetHooks s p -- ^ Hooks
+  -> p                        -- ^ Parameters
+  -> s                        -- ^ Initial state
   -> m (RenewableKeySet s p)
 mkRenewableKeySet rksHooks rksParameters userState = liftIO $ do
   rksState <- newIORef ([], userState)
