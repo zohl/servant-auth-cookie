@@ -111,6 +111,14 @@ import Servant (ToHttpApiData (..))
 import Data.ByteString.Conversion (ToByteString (..))
 #endif
 
+#if MIN_VERSION_http_types(0,9,2)
+import Network.HTTP.Types (hSetCookie)
+#else
+hSetCookie :: HeaderName
+hSetCookie = "Set-Cookie"
+#endif
+
+
 ----------------------------------------------------------------------------
 -- General types
 
@@ -502,7 +510,7 @@ addSessionToErr
   -> m ServantErr
 addSessionToErr acs rs sk sessionData err = do
   header <- renderSession acs rs sk sessionData
-  return err { errHeaders = ("set-cookie", header) : errHeaders err }
+  return err { errHeaders = (hSetCookie, header) : errHeaders err }
 
 -- | Request handler that checks cookies. If 'Cookie' is just missing, you
 -- get 'Nothing', but if something is wrong with its format, 'getSession'
@@ -538,7 +546,7 @@ parseSessionResponse
   :: AuthCookieSettings
   -> ResponseHeaders
   -> Maybe (Tagged SerializedEncryptedCookie ByteString)
-parseSessionResponse acs hdrs = parseSession acs "set-cookie" hdrs
+parseSessionResponse acs hdrs = parseSession acs hSetCookie hdrs
 
 -- | Render session cookie to 'ByteString'.
 renderSession
