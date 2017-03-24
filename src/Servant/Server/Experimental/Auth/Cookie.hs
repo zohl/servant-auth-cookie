@@ -124,6 +124,14 @@ import Servant (ToHttpApiData (..))
 import Data.ByteString.Conversion (ToByteString (..))
 #endif
 
+#if MIN_VERSION_http_types(0,9,2)
+import Network.HTTP.Types (hSetCookie)
+#else
+hSetCookie :: HeaderName
+hSetCookie = "Set-Cookie"
+#endif
+
+
 ----------------------------------------------------------------------------
 -- General types
 
@@ -166,7 +174,7 @@ instance ToByteString EncryptedSession where
 #endif
 
 -- | Helper type to wrap endpoints.
-type Cookied a = Headers '[S.Header "set-cookie" EncryptedSession] a
+type Cookied a = Headers '[S.Header "Set-Cookie" EncryptedSession] a
 
 -- | The exception is thrown when something goes wrong with this package.
 data AuthCookieException
@@ -257,7 +265,7 @@ data PersistentServerKey = PersistentServerKey
 
 instance ServerKeySet PersistentServerKey where
   getKeys     = return . (,[]) . pskBytes
-  removeKey _ = error "TODO: Not implemented"
+  removeKey _ = error "removeKey @PersistentServerKey: not implemented"
 
 -- | Create instance of 'PersistentServerKey'.
 mkPersistentServerKey :: ByteString -> PersistentServerKey
@@ -568,7 +576,7 @@ addSessionToErr
   -> m ServantErr
 addSessionToErr acs rs sk sessionData err = do
   header <- renderSession acs rs sk sessionData
-  return err { errHeaders = ("set-cookie", header) : errHeaders err }
+  return err { errHeaders = (hSetCookie, header) : errHeaders err }
 
 -- | Request handler that checks cookies. If 'Cookie' is just missing, you
 -- get 'Nothing', but if something is wrong with its format, 'getSession'
@@ -604,7 +612,7 @@ parseSessionResponse
   :: AuthCookieSettings
   -> ResponseHeaders
   -> Maybe (Tagged SerializedEncryptedCookie ByteString)
-parseSessionResponse acs hdrs = parseSession acs "set-cookie" hdrs
+parseSessionResponse acs hdrs = parseSession acs hSetCookie hdrs
 
 -- | Render session cookie to 'ByteString'.
 renderSession
