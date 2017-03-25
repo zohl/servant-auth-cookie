@@ -7,9 +7,6 @@
 
 module Main (main) where
 
-main :: IO ()
-main = return ()
-{-
 import           Control.Concurrent                      (threadDelay)
 import           Crypto.Cipher.AES                       (AES128, AES192,
                                                           AES256)
@@ -37,10 +34,10 @@ main = hspec spec
 
 spec :: Spec
 spec = do
-  describe "RandomSource" randomSourceSpec
-  describe "ServerKey"    serverKeySpec
-  describe "Cookie"       cookieSpec
-  describe "Session"      sessionSpec
+  describe "RandomSource"        randomSourceSpec
+  describe "PersistentServerKey" persistentServerKeySpec
+  describe "Cookie"              cookieSpec
+  describe "Session"             sessionSpec
 
 randomSourceSpec :: Spec
 randomSourceSpec = do
@@ -64,33 +61,21 @@ randomSourceSpec = do
       s2 <- getRandomBytes rs 10
       s1 `shouldNotBe` s2
 
-serverKeySpec :: Spec
-serverKeySpec = do
-  context "when creating a new server key" $
+persistentServerKeySpec :: Spec
+persistentServerKeySpec = do
+  context "when creating a new persistent server key" $ do
+    let keySize = 64
+    let sk = mkPersistentServerKey <$> generateRandomBytes keySize
+             >>= getKeys
+
     it "has correct size" $ do
-      let keySize = 64
-      sk <- mkServerKey keySize Nothing
-      k  <- getServerKey sk
+      (k, _) <- sk
       BS.length k `shouldNotBe` (keySize `div` 8)
-  context "when creating a new server key from data" $
-    it "has data as server key" $ do
-      let bytes = "0123456789"
-      sk <- mkServerKeyFromBytes bytes
-      k  <- getServerKey sk
-      k `shouldBe` bytes
-  context "until expiration" $
-    it "returns the same key" $ do
-      sk <- mkServerKey 16 Nothing
-      k0 <- getServerKey sk
-      k1 <- getServerKey sk
-      k0 `shouldBe` k1
-  context "when a key expires" $
-    it "is reset" $ do
-      sk <- mkServerKey 16 (Just $ fromIntegral (1 :: Integer))
-      k1 <- getServerKey sk
-      threadDelay 2000000
-      k2 <- getServerKey sk
-      k1 `shouldNotBe` k2
+
+    it "has no rotated keys" $ do
+      (_, ks) <- sk
+      length ks `shouldBe` 0
+
 
 cookieSpec :: Spec
 cookieSpec = do
@@ -182,7 +167,8 @@ cipherId :: (HashAlgorithm h, BlockCipher c)
   -> (BS.ByteString -> BS.ByteString) -- ^ Encryption hook
   -> IO Cookie         -- ^ Restored 'Cookie'
 cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
-  sk     <- mkServerKey 16 Nothing
+  sk <- mkPersistentServerKey <$> generateRandomBytes 16
+
   let sts =
         case def of
           AuthCookieSettings {..} -> AuthCookieSettings
@@ -191,7 +177,7 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
             , acsHashAlgorithm    = h
             , acsCipher           = c
             , .. }
-  encryptCookie sts sk cookie >>= decryptCookie sts sk . fmap encryptionHook
+  encryptCookie sts sk cookie >>= (fmap wmData . decryptCookie sts sk . fmap encryptionHook)
 
 sessionSpec :: Spec
 sessionSpec = do
@@ -232,8 +218,8 @@ encryptThenDecrypt :: Serialize a
   -> IO (Tree a)
 encryptThenDecrypt _ settings x = do
   rs <- mkRandomSource drgNew 1000
-  sk <- mkServerKey 16 Nothing
-  encryptSession settings rs sk x >>= decryptSession settings sk
+  sk <- mkPersistentServerKey <$> generateRandomBytes 16
+  encryptSession settings rs sk x >>= (fmap wmData . decryptSession settings sk)
 
 data Tree a = Leaf a | Node a [Tree a] deriving (Eq, Show, Generic)
 
@@ -249,5 +235,4 @@ arbitraryTree n = do
   oneof
     [ Leaf <$> arbitrary
     , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
--}
 
