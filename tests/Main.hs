@@ -8,6 +8,7 @@
 module Main (main) where
 
 import           Control.Concurrent                      (threadDelay)
+import           Control.Monad.IO.Class                  (MonadIO, liftIO)
 import           Crypto.Cipher.AES                       (AES128, AES192,
                                                           AES256)
 import           Crypto.Cipher.Types
@@ -36,6 +37,7 @@ spec :: Spec
 spec = do
   describe "RandomSource"        randomSourceSpec
   describe "PersistentServerKey" persistentServerKeySpec
+  describe "RenewalKeySet"       renewalKeySetSpec
   describe "Cookie"              cookieSpec
   describe "Session"             sessionSpec
 
@@ -65,16 +67,76 @@ persistentServerKeySpec :: Spec
 persistentServerKeySpec = do
   context "when creating a new persistent server key" $ do
     let keySize = 64
-    let sk = mkPersistentServerKey <$> generateRandomBytes keySize
-             >>= getKeys
+    let getSK = mkPersistentServerKey <$> generateRandomBytes keySize
+            >>= getKeys
 
     it "has correct size" $ do
-      (k, _) <- sk
+      (k, _) <- getSK
       BS.length k `shouldNotBe` (keySize `div` 8)
 
     it "has no rotated keys" $ do
-      (_, ks) <- sk
+      (_, ks) <- getSK
       length ks `shouldBe` 0
+
+
+renewalKeySetSpec :: Spec
+renewalKeySetSpec = spec' where
+
+  keySize :: Int
+  keySize = 16
+
+  rkshNewState :: (MonadIO m)
+    => NominalDiffTime
+    -> ([ServerKey], UTCTime)
+    -> m ([ServerKey], UTCTime)
+  rkshNewState _ (keys, _) = liftIO $ (,)
+    <$> (fmap (:keys) $ generateRandomBytes keySize)
+    <*> getCurrentTime
+
+  rkshNeedUpdate :: (MonadIO m)
+    => NominalDiffTime
+    -> ([ServerKey], UTCTime)
+    -> m Bool
+  rkshNeedUpdate dt (_, t) = liftIO $ getCurrentTime >>= return . ((dt `addUTCTime` t) <)
+
+  rkshRemoveKey :: (MonadIO m)
+    => NominalDiffTime
+    -> ServerKey
+    -> m ()
+  rkshRemoveKey _ _ = return ()
+
+  spec' = do
+    let makeSK = mkRenewableKeySet
+          RenewableKeySetHooks {..}
+          (fromIntegral (1 :: Integer))
+          (UTCTime (toEnum 0) 0)
+
+    context "when accessing a renewable key set" $ do
+      it "updates the keys when needed" $ do
+        sk <- makeSK
+
+        (k, ks) <- getKeys sk
+        BS.length k `shouldNotBe` 0
+
+        (_, ks') <- threadDelay 1500000 >> getKeys sk
+        ks' `shouldBe` (k:ks)
+
+      it "doesn't update the keys when not needed" $ do
+        sk <- makeSK
+        k  <- getKeys sk
+        k' <- getKeys sk
+        k' `shouldBe` k
+
+    context "when removing key from a renewable key set" $ do
+      it "removes specified key" $ do
+        sk <- makeSK
+        (_, ks) <- getKeys sk >> threadDelay 1500000 >> getKeys sk
+        length ks `shouldNotBe` 0
+
+        let k = head ks
+        removeKey sk k
+        (_, ks') <- getKeys sk
+        (k:ks') `shouldBe` ks
 
 
 cookieSpec :: Spec
