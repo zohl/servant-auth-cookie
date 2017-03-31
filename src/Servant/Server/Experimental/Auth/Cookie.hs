@@ -32,8 +32,10 @@ module Servant.Server.Experimental.Auth.Cookie
   , AuthCookieException (..)
 
   , WithMetadata (..)
+#if MIN_VERSION_servant(0,9,1)
   , Cookied
   , cookied
+#endif
 
   , RandomSource
   , mkRandomSource
@@ -100,9 +102,9 @@ import Data.Typeable
 import GHC.TypeLits (Symbol)
 import Network.HTTP.Types (hCookie, HeaderName, RequestHeaders, ResponseHeaders)
 import Network.Wai (Request, requestHeaders)
-import Servant (Handler, noHeader, addHeader, ServantErr (..))
+import Servant (addHeader, ServantErr (..))
 import Servant.API.Experimental.Auth (AuthProtect)
-import Servant.API.ResponseHeaders (Headers, AddHeader)
+import Servant.API.ResponseHeaders (AddHeader)
 import Servant.Server (err403)
 import Servant.Server.Experimental.Auth
 import Web.Cookie
@@ -111,7 +113,6 @@ import qualified Data.ByteArray         as BA
 import qualified Data.ByteString        as BS
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8  as BSC8
-import qualified Servant.API.Header as S(Header)
 import qualified Network.HTTP.Types as N(Header)
 
 #if !MIN_VERSION_base(4,8,0)
@@ -124,13 +125,21 @@ import Servant (ToHttpApiData (..))
 import Data.ByteString.Conversion (ToByteString (..))
 #endif
 
+#if MIN_VERSION_servant(0,9,1)
+import Servant (noHeader, Handler)
+import Servant.API.ResponseHeaders (Headers)
+import qualified Servant.API.Header as S(Header)
+#endif
+
 #if MIN_VERSION_http_types(0,9,2)
 import Network.HTTP.Types (hSetCookie)
+#endif
+
+#if MIN_VERSION_http_types(0,9,2)
 #else
 hSetCookie :: HeaderName
 hSetCookie = "Set-Cookie"
 #endif
-
 
 ----------------------------------------------------------------------------
 -- General types
@@ -173,8 +182,10 @@ instance ToByteString EncryptedSession where
   builder (EncryptedSession s) = builder s
 #endif
 
+#if MIN_VERSION_servant(0,9,1)
 -- | Helper type to wrap endpoints.
 type Cookied a = Headers '[S.Header "Set-Cookie" EncryptedSession] a
+#endif
 
 -- | The exception is thrown when something goes wrong with this package.
 data AuthCookieException
@@ -636,6 +647,7 @@ renderSession acs@AuthCookieSettings {..} rs sk sessionData = do
   (return . toByteString . renderCookies) cookies
 
 
+#if MIN_VERSION_servant(0,9,1)
 -- | Wrapper for an implementation of an endpoint to make it automatically
 -- renew the cookies.
 cookied :: (Serialize a, ServerKeySet k)
@@ -646,6 +658,7 @@ cookied :: (Serialize a, ServerKeySet k)
   -> ((WithMetadata a) -> Handler (Cookied r)) -- ^ "Cookied" endpoint
 cookied acs rs k f = \(WithMetadata {..}) ->
   (if wmRenew then addSession acs rs k wmData else (return . noHeader)) $ f wmData
+#endif
 
 ----------------------------------------------------------------------------
 -- Default auth handler

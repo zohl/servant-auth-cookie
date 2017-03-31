@@ -37,7 +37,7 @@ import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application, Request)
-import Servant (Handler, ReqBody, FormUrlEncoded, Capture)
+import Servant (Handler, ReqBody, FormUrlEncoded)
 import Servant ((:<|>)(..), (:>), errBody, throwError, err403, toQueryParam)
 import Servant (Post, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
@@ -52,6 +52,12 @@ import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8 as BSC8
+
+#if MIN_VERSION_servant (0,9,1)
+import Servant (Capture)
+#else
+import Servant (Headers, Header)
+#endif
 
 #if MIN_VERSION_servant (0,9,0)
 import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
@@ -215,6 +221,7 @@ mkFileKeySet = mkKeySet where
 -- API of the example
 
 -- | Interface
+#if MIN_VERSION_servant(0,9,1)
 type ExampleAPI =
        Get '[HTML] Markup
   :<|> "login" :> Get '[HTML] Markup
@@ -225,6 +232,18 @@ type ExampleAPI =
          Get '[HTML] Markup
     :<|> "add" :> Get '[HTML] Markup
     :<|> "rem" :> Capture "key" String :> Get '[HTML] Markup)
+#else
+type ExampleAPI =
+       Get '[HTML] Markup
+  :<|> "login" :> Get '[HTML] Markup
+  :<|> "login"
+       :> ReqBody '[FormUrlEncoded] LoginForm
+       :> Post '[HTML] (Headers '[Header "Set-Cookie" EncryptedSession] Markup)
+  :<|> "logout"
+       :> Get '[HTML] (Headers '[Header "Set-Cookie" EncryptedSession] Markup)
+  :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] Markup
+  :<|> "keys" :> Get '[HTML] Markup
+#endif
 
 -- | Implementation
 server :: (ServerKeySet s)
@@ -233,22 +252,22 @@ server :: (ServerKeySet s)
   -> RandomSource
   -> s
   -> Server ExampleAPI
-server settings generateKey rs sks = serveHome
-    :<|> serveLogin
-    :<|> serveLoginPost
-    :<|> serveLogout
-    :<|> (cookied' servePrivate)
-    :<|> serveKeys where
+#if MIN_VERSION_servant(0,9,1)
+server settings generateKey rs sks =
+#else
+server settings _generateKey rs sks =
+#endif
+       serveHome
+  :<|> serveLogin
+  :<|> serveLoginPost
+  :<|> serveLogout
+  :<|> servePrivate
+  :<|> serveKeys where
 
   addSession' = addSession
     settings -- the settings
     rs       -- random source
     sks      -- server key set
-
-  cookied' = cookied
-    settings
-    rs
-    sks
 
   serveHome = return homePage
   serveLogin = return (loginPage True)
@@ -262,9 +281,15 @@ server settings generateKey rs sks = serveHome
 
   serveLogout = removeSession settings (redirectPage "/" "Session has been terminated")
 
-  servePrivate (Account uid u p) = privatePage uid u p
+#if MIN_VERSION_servant(0,9,1)
+  servePrivate = cookied settings rs sks servePrivate'
+#else
+  servePrivate = return . servePrivate' . wmData
+#endif
+  servePrivate' (Account uid u p) = privatePage uid u p
 
-  serveKeys = (keysPage <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey
+#if MIN_VERSION_servant(0,9,1)
+  serveKeys = (keysPage True <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey
 
   serveAddKey = do
     liftIO $ generateKey
@@ -276,7 +301,9 @@ server settings generateKey rs sks = serveHome
       removeKey sks key
       return $ redirectPage "/keys" "The key was removed")
     (Base64.decode . BSC8.pack $ b64key)
-
+#else
+  serveKeys = keysPage False <$> getKeys sks
+#endif
 
 -- | Custom handler that bluntly reports any occurred errors.
 authHandler :: (ServerKeySet s)
@@ -362,14 +389,15 @@ privatePage uid username' password' = H.docTypeHtml $ do
     H.hr
     H.a ! A.href "/logout" $ "logout"
 
-keysPage :: (BSC8.ByteString, [BSC8.ByteString]) -> Markup
-keysPage (k, ks) = H.docTypeHtml $ do
+keysPage :: Bool -> (BSC8.ByteString, [BSC8.ByteString]) -> Markup
+keysPage showControls (k, ks) = H.docTypeHtml $ do
   H.head (H.title "keys")
   H.body $ do
     pageMenu
-    H.a ! A.href "/keys/add" $ "add new key"
+    when showControls $
+      H.a ! A.href "/keys/add" $ "add new key"
     H.p $ H.b $ keyElement False k
-    mapM_ H.p $ map (keyElement True) ks
+    mapM_ H.p $ map (keyElement showControls) ks
 
 keyElement :: Bool -> BSC8.ByteString -> Markup
 keyElement removable key = let

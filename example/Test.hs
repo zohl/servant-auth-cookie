@@ -6,16 +6,12 @@
 
 import Prelude ()
 import Prelude.Compat
-import Control.Arrow ((***))
-import Control.Exception.Base (bracket)
-import Control.Monad (void, when)
-import Data.Monoid ((<>))
 import Data.Maybe (fromMaybe)
 import Data.Int (Int64)
 import Data.Time.Clock (UTCTime(..))
 import Control.Monad.IO.Class (liftIO)
-import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..), mkFileKeySet, FileKSParams(..), mkFileKey)
-import Test.Hspec (Spec, hspec, describe, context, it, shouldBe, shouldSatisfy)
+import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..))
+import Test.Hspec (Spec, hspec, describe, context, it)
 import Test.Hspec.Wai (WaiSession, WaiExpectation, shouldRespondWith, with, request, get)
 import Text.Blaze.Renderer.Utf8 (renderMarkup)
 import Text.Blaze (Markup)
@@ -23,16 +19,12 @@ import Servant (Proxy(..))
 import Crypto.Random (drgNew)
 import Servant (FormUrlEncoded, contentType)
 import Servant.Server.Experimental.Auth.Cookie
-import Network.HTTP.Types (Header, methodGet, methodPost, hContentType, hCookie, urlEncode)
+import Network.HTTP.Types (Header, methodGet, methodPost, hContentType, hCookie)
 import Network.HTTP.Media.RenderHeader (renderHeader)
 import Network.Wai.Test (SResponse(..))
-import System.Directory (removeDirectoryRecursive, doesDirectoryExist)
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BSC8
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC8
-import qualified Text.Blaze.Html5 as H
-import qualified Text.Blaze.Html5.Attributes as A
 
 #if MIN_VERSION_hspec_wai (0,7,0)
 import Test.Hspec.Wai.Matcher (bodyEquals, ResponseMatcher(..), MatchBody(..))
@@ -44,6 +36,20 @@ import Test.Hspec.Wai (matchBody)
 import Web.FormUrlEncoded (ToForm, toForm, urlEncodeForm)
 #else
 import Servant (ToFormUrlEncoded, mimeRender)
+#endif
+
+#if MIN_VERSION_servant (0,9,1)
+import AuthAPI (mkFileKeySet, FileKSParams(..), mkFileKey)
+import Control.Arrow ((***))
+import Control.Monad (void, when)
+import Data.Monoid ((<>))
+import Control.Exception.Base (bracket)
+import Network.HTTP.Types (urlEncode)
+import Test.Hspec (shouldBe, shouldSatisfy)
+import System.Directory (removeDirectoryRecursive, doesDirectoryExist)
+import qualified Data.ByteString.Char8 as BSC8
+import qualified Text.Blaze.Html5 as H
+import qualified Text.Blaze.Html5.Attributes as A
 #endif
 
 
@@ -67,7 +73,7 @@ main = do
     , ssGenerateKey  = return ()
     } >>= hspec . basicSpec
 
-
+#if MIN_VERSION_servant (0,9,1)
   let rmDir name = doesDirectoryExist name
         >>= \exists -> when exists $ removeDirectoryRecursive name
 
@@ -89,7 +95,7 @@ main = do
          , ssServerKeySet = ks
          , ssGenerateKey  = mkFileKey fksp
          })
-
+#endif
 
 basicSpec :: SpecState -> Spec
 basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
@@ -144,6 +150,7 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
       getPrivate cookieValue `shouldRespondWithException` (CookieExpired t t)
 
 
+#if MIN_VERSION_servant (0,9,1)
 renewalSpec :: SpecState -> Spec
 renewalSpec (SpecState {..}) = describe "renewal functionality" $ with
   (return $ app ssAuthSettings ssGenerateKey ssRandomSource ssServerKeySet) $ do
@@ -197,7 +204,7 @@ renewalSpec (SpecState {..}) = describe "renewal functionality" $ with
       _ <- getPrivate cookieValue `shouldRespondWith` 200
       r <- getPrivate cookieValue
       liftIO $ (lookup "set-cookie" $ simpleHeaders r) `shouldBe` Nothing
-
+#endif
 
 #if MIN_VERSION_hspec_wai (0,7,0)
 matchBody' :: BSL.ByteString -> MatchBody
@@ -260,6 +267,7 @@ forgeCookies ss newAuthSettings newServerKeySet r = extractSession ss r
   >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . wmData
 
 
+#if MIN_VERSION_servant (0,9,1)
 extractKeys :: WaiSession [BS.ByteString]
 extractKeys = (extractKeys' . BSL.toStrict . simpleBody) <$> get "/keys" where
   del = '#'
@@ -283,4 +291,5 @@ addKey = void $ get "/keys/add"
 
 remKey :: BS.ByteString -> WaiSession ()
 remKey key = void $ get $ "/keys/rem/" <> (urlEncode True $ key)
+#endif
 
