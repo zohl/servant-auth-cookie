@@ -21,4 +21,3 @@ main = do
   k <- mkFileKeySet fksp
 
   run 8080 (app authSettings (mkFileKey fksp) rs k)
-
