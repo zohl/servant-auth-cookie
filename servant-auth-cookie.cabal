@@ -74,14 +74,15 @@ library
     build-depends:
       servant >= 0.9,
       http-api-data == 0.3.*
-  else if flag(servant91)
-    build-depends:
-      servant >= 0.9,
-      http-api-data == 0.3.*
   else
-    build-depends:
-      servant < 0.9,
-      bytestring-conversion >= 0.3.1 && <0.4
+    if flag(servant91)
+      build-depends:
+        servant >= 0.9,
+        http-api-data == 0.3.*
+    else
+      build-depends:
+        servant < 0.9,
+        bytestring-conversion >= 0.3.1 && <0.4
 
 test-suite tests
   type:           exitcode-stdio-1.0
@@ -195,14 +196,15 @@ test-suite example-tests
       build-depends:
         servant >= 0.9,
         http-api-data == 0.3.*
-    else if flag(servant91)
-      build-depends:
-        servant >= 0.9.1,
-        http-api-data == 0.3.*
     else
-      build-depends:
-        servant < 0.9,
-        bytestring-conversion >= 0.3.1 && <0.4
+      if flag(servant91)
+        build-depends:
+          servant >= 0.9.1,
+          http-api-data == 0.3.*
+      else
+        build-depends:
+          servant < 0.9,
+          bytestring-conversion >= 0.3.1 && <0.4
 
     if !impl(ghc >= 7.8)
       build-depends:    tagged    == 0.8.*
