@@ -38,7 +38,7 @@ install:
  - travis_retry cabal update
  - if [ ! -z "$CABALCONFIG" ]; then cp .travis/${CABALCONFIG}-cabal.config cabal.config; fi
  - cabal install --only-dependencies --enable-tests --max-backjumps=-1
- - cabal install -v base-compat blaze-html blaze-markup directory filepath hspec-wai http-media servant-blaze text wai-extra warp
+ - cabal install -v --avoid-reinstalls base-compat blaze-html blaze-markup directory filepath hspec-wai http-media servant-blaze text wai-extra warp
 
 script:
  - case "$CABALVER" in
