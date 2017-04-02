@@ -38,11 +38,12 @@ install:
  - travis_retry cabal update
  - if [ ! -z "$CABALCONFIG" ]; then cp .travis/${CABALCONFIG}-cabal.config cabal.config; fi
  - cabal install --only-dependencies --enable-tests --max-backjumps=-1
+ - cabal install -v base-compat blaze-html blaze-markup directory filepath hspec-wai http-media servant-blaze text wai-extra warp
 
 script:
  - case "$CABALVER" in
-    "1.18") cabal configure --enable-tests --enable-library-coverage -v2 -f dev ;;
-    *)      cabal configure --enable-tests --enable-coverage -v2 -f dev ;;
+    "1.18") cabal configure --enable-tests --enable-library-coverage -v2 -f dev -f build-examples ;;
+    *)      cabal configure --enable-tests --enable-coverage -v2 -f dev -f build-examples ;;
    esac
  - cabal build
  - cabal test --show-details=always
