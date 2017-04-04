@@ -38,7 +38,7 @@ install:
  - travis_retry cabal update
  - if [ ! -z "$CABALCONFIG" ]; then cp .travis/${CABALCONFIG}-cabal.config cabal.config; fi
  - cabal install --only-dependencies --enable-tests --max-backjumps=-1
- - cabal install -v --avoid-reinstalls servant-blaze
+ - cabal install -v --avoid-reinstalls servant-blaze hspec-wai --constraint='foundation < 0.0.5'
 
 script:
  - case "$CABALVER" in
