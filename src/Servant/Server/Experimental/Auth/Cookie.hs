@@ -53,6 +53,7 @@ module Servant.Server.Experimental.Auth.Cookie
   , addSession
   , removeSession
   , addSessionToErr
+  , removeSessionFromErr
   , getSession
 
   -- exposed for testing purpose
@@ -475,25 +476,13 @@ addSession acs rs sk sessionData response = do
   return (addHeader (EncryptedSession header) response)
 
 -- |  "Remove" a session by invalidating the cookie.
--- Cookie expiry date is set at 0  and content is wiped
 removeSession  :: ( Monad m,
                     AddHeader (e :: Symbol) EncryptedSession s r )
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> s                 -- ^ Response to return with  session removed
   -> m r               -- ^ Response with the session "removed"
-removeSession AuthCookieSettings{..} response = 
-  let invalidDate = BSC8.pack $ formatTime
-        defaultTimeLocale
-        acsExpirationFormat
-        timeOrigin
-      timeOrigin = UTCTime (toEnum 0) 0
-      cookies =
-        (acsSessionField, "") :
-        ("Path",    acsPath) :
-        ("Expires", invalidDate) :
-        ((,"") <$> acsCookieFlags)
-      header = (toByteString . renderCookies) cookies
-   in return (addHeader (EncryptedSession header) response)
+removeSession acs response =
+  return (addHeader (EncryptedSession $ expiredCookie acs) response)
 
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
@@ -511,6 +500,30 @@ addSessionToErr
 addSessionToErr acs rs sk sessionData err = do
   header <- renderSession acs rs sk sessionData
   return err { errHeaders = (hSetCookie, header) : errHeaders err }
+
+-- |  "Remove" a session by invalidating the cookie.
+-- Cookie expiry date is set at 0  and content is wiped
+removeSessionFromErr  :: ( Monad m )
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> ServantErr         -- ^ Servant error to add the cookie to
+  -> m ServantErr
+removeSessionFromErr acs err =
+  return $ err { errHeaders = (hSetCookie, expiredCookie acs) : errHeaders err }
+
+-- | Cookie expiry date is set at 0 and content is wiped.
+expiredCookie :: AuthCookieSettings -> ByteString
+expiredCookie AuthCookieSettings{..} = (toByteString . renderCookies) cookies
+  where
+    cookies =
+      (acsSessionField, "") :
+      ("Path",    acsPath) :
+      ("Expires", invalidDate) :
+      ((,"") <$> acsCookieFlags)
+    invalidDate = BSC8.pack $ formatTime
+      defaultTimeLocale
+      acsExpirationFormat
+      timeOrigin
+    timeOrigin = UTCTime (toEnum 0) 0
 
 -- | Request handler that checks cookies. If 'Cookie' is just missing, you
 -- get 'Nothing', but if something is wrong with its format, 'getSession'
