@@ -38,8 +38,8 @@ import Web.FormUrlEncoded (ToForm, toForm, urlEncodeForm)
 import Servant (ToFormUrlEncoded, mimeRender)
 #endif
 
-#if MIN_VERSION_servant (0,9,1)
-import AuthAPI (mkFileKeySet, FileKSParams(..), mkFileKey)
+#if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
+import FileKeySet (mkFileKeySet, FileKSParams(..), mkFileKey)
 import Control.Arrow ((***))
 import Control.Monad (void, when)
 import Data.Monoid ((<>))
@@ -73,7 +73,7 @@ main = do
     , ssGenerateKey  = return ()
     } >>= hspec . basicSpec
 
-#if MIN_VERSION_servant (0,9,1)
+#if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
   let rmDir name = doesDirectoryExist name
         >>= \exists -> when exists $ removeDirectoryRecursive name
 
@@ -150,7 +150,7 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
       getPrivate cookieValue `shouldRespondWithException` (CookieExpired t t)
 
 
-#if MIN_VERSION_servant (0,9,1)
+#if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 renewalSpec :: SpecState -> Spec
 renewalSpec (SpecState {..}) = describe "renewal functionality" $ with
   (return $ app ssAuthSettings ssGenerateKey ssRandomSource ssServerKeySet) $ do
@@ -267,7 +267,7 @@ forgeCookies ss newAuthSettings newServerKeySet r = extractSession ss r
   >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . wmData
 
 
-#if MIN_VERSION_servant (0,9,1)
+#if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 extractKeys :: WaiSession [BS.ByteString]
 extractKeys = (extractKeys' . BSL.toStrict . simpleBody) <$> get "/keys" where
   del = '#'
