@@ -61,7 +61,7 @@ import Servant (FromFormUrlEncoded(..), ToFormUrlEncoded(..))
 import Servant (Handler, throwError)
 #else
 import Control.Monad.Except (ExceptT, throwError)
-import Servant (ServantErr, throwError)
+import Servant (ServantErr)
 #endif
 
 #if !MIN_VERSION_servant (0,7,0)
