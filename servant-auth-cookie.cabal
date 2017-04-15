@@ -1,5 +1,5 @@
 name:                servant-auth-cookie
-version:             0.4.4
+version:             0.5.0
 synopsis:            Authentication via encrypted cookies
 description:         Authentication via encrypted client-side cookies,
                      inspired by client-session library by Michael Snoyman and based on

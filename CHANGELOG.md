@@ -1,8 +1,20 @@
 # Change Log
 
-## [Unreleased]
+## [HEAD]
 
-## [0.4.4]
+## [0.5.0] - 2017-04-15
+### Changed
+- Server keys management:
+  - `ServerKey` becomes `ServerKeySet`.
+  - `mkServerKeyFromBytes` becomes `mkPersistentServerKey`.
+
+### Deleted
+- `mkServerKey` (instead use custom instance of `ServerKeySet`.
+
+### Added
+- class `Cookied` and function `cookied` to faciliate usage of mutable server keys.
+
+## [0.4.4] - 2017-04-15
 ### Added
 - Tests for the example.
 - `parseSessionRequest` and `parseSessionResponse` functions.
@@ -89,7 +101,8 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.4.4...HEAD
+[HEAD]:    ../../compare/v0.5.0...HEAD
+[0.5.0]:   ../../compare/v0.4.4...v0.5.0
 [0.4.4]:   ../../compare/v0.4.3.3...v0.4.4
 [0.4.3.3]: ../../compare/v0.4.3.2...v0.4.3.3
 [0.4.3.2]: ../../compare/v0.4.3.1...v0.4.3.2
