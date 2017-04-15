@@ -1,9 +1,12 @@
 # Change Log
 
 ## [Unreleased]
+
+## [0.4.4]
 ### Added
 - Tests for the example.
 - `parseSessionRequest` and `parseSessionResponse` functions.
+- `removeSessionFromErr` function.
 
 ### Changed
 - Fixed constraint for `removeSession`.
@@ -86,7 +89,8 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.4.3.3...HEAD
+[HEAD]:    ../../compare/v0.4.4...HEAD
+[0.4.4]:   ../../compare/v0.4.3.3...v0.4.4
 [0.4.3.3]: ../../compare/v0.4.3.2...v0.4.3.3
 [0.4.3.2]: ../../compare/v0.4.3.1...v0.4.3.2
 [0.4.3.1]: ../../compare/v0.4.3...v0.4.3.1
