@@ -10,15 +10,8 @@ let
 
   haskellPackages_ = haskellPackages.override {
     overrides = self: super: {
-      servant = self.servant_0_10;
-      servant-server = self.servant-server_0_10;
-      natural-transformation = dontCheck self.natural-transformation_0_4;
-      hspec-wai = dontCheck self.hspec-wai_0_8_0;
-      hspec-expectations = dontCheck self.hspec-expectations_0_8_2;
-      hspec-meta = dontCheck self.hspec-meta_2_3_2;
-      hspec-core = dontCheck self.hspec-core_2_4_1;
-      hspec = dontCheck self.hspec_2_4_1;
-      hspec-discover = dontCheck self.hspec-discover_2_4_1;
+      servant = dontCheck self.servant_0_10;
+      servant-server = dontCheck self.servant-server_0_10;
     };
   };
 
