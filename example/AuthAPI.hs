@@ -30,8 +30,8 @@ import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application, Request)
-import Servant (Handler, ReqBody, FormUrlEncoded)
-import Servant ((:<|>)(..), (:>), errBody, throwError, err403, toQueryParam)
+import Servant (ReqBody, FormUrlEncoded)
+import Servant ((:<|>)(..), (:>), errBody, err403, toQueryParam)
 import Servant (Post, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
@@ -55,6 +55,17 @@ import Servant (Headers, Header)
 import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
 #else
 import Servant (FromFormUrlEncoded(..), ToFormUrlEncoded(..))
+#endif
+
+#if MIN_VERSION_servant (0,7,0)
+import Servant (Handler, throwError)
+#else
+import Control.Monad.Except (ExceptT, throwError)
+import Servant (ServantErr, throwError)
+#endif
+
+#if !MIN_VERSION_servant (0,7,0)
+type Handler a = ExceptT ServantErr IO a
 #endif
 
 ----------------------------------------------------------------------------
