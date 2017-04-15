@@ -23,7 +23,6 @@ import Prelude ()
 import Prelude.Compat
 import Control.Monad.Catch (catch)
 import Control.Monad
-import Control.Monad.IO.Class (liftIO)
 import Data.ByteString.Lazy (fromStrict)
 import Data.Default (def)
 import Data.List (find)
@@ -46,6 +45,7 @@ import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8 as BSC8
 
 #if MIN_VERSION_servant (0,9,1)
+import Control.Monad.IO.Class (liftIO)
 import Servant (Capture)
 #else
 import Servant (Headers, Header)
