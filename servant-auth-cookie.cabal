@@ -37,6 +37,7 @@ flag servant91
 
 flag build-examples
   description:        Build example executables.
+  manual:             True
   default:            False
 
 

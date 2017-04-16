@@ -466,7 +466,7 @@ decryptCookie AuthCookieSettings {..} sks (Tagged s) = do
   (currentKey, rotatedKeys) <- getKeys sks
   (serverKey, renew) <- if checkMac currentKey
     then return (currentKey, False)
-    else (,True) <$> maybe
+    else liftM (,True) $ maybe
       (throwM $ IncorrectMAC mac)
       (return)
       (listToMaybe . map fst . filter snd . map (id &&& checkMac) $ rotatedKeys)
