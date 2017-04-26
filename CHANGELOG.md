@@ -2,6 +2,10 @@
 
 ## [HEAD]
 
+## [0.5.0.2] - 2017-04-26
+### Changed
+- Fixed dependencies' bounds.
+
 ## [0.5.0.1] - 2017-04-16
 ### Changed
 - Fixed incompatibility with older versions of GHC.
@@ -105,8 +109,9 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.5.0.1...HEAD
-[0.5.0]:   ../../compare/v0.5.0...v0.5.0.1
+[HEAD]:    ../../compare/v0.5.0.2...HEAD
+[0.5.0.2]: ../../compare/v0.5.0.1...v0.5.0.2
+[0.5.0.1]: ../../compare/v0.5.0...v0.5.0.1
 [0.5.0]:   ../../compare/v0.4.4...v0.5.0
 [0.4.4]:   ../../compare/v0.4.3.3...v0.4.4
 [0.4.3.3]: ../../compare/v0.4.3.2...v0.4.3.3
