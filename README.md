@@ -10,16 +10,6 @@ library by Michael Snoyman and based on ideas of the paper
 ["A Secure Cookie Protocol"](http://www.cse.msu.edu/~alexliu/publications/Cookie/cookie.pdf)
 by Alex Liu et al.
 
-## Demo
-Type `cabal run example` to launch a local server with cookie
-authentication at 8080 port. It's a simple three-paged web site that
-will show the private page only if a correct cookie is presented. For
-valid accounts see `usersDB` list in `example/Main.hs`.
-
-## Known limitations (for versions below v0.5.0)
-Renewal of a `ServerKey` immediately invalidates existing sessions, thus is not recommended to use frequently.
-Restarting an application with key renewal will result in the same effect.
-
-## See also
+## Resources
 - [Changelog](../master/CHANGELOG.md)
-
+- [Wiki](https://github.com/zohl/servant-auth-cookie/wiki)
