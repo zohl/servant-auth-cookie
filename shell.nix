@@ -10,9 +10,9 @@ let
 
   haskellPackages_ = haskellPackages.override {
     overrides = self: super: {
-      cryptonite = dontCheck (self.callPackage ./deps/cryptonite-0.23.nix {});
-      foundation = dontCheck (self.callPackage ./deps/foundation-0.0.8.nix {});
-      memory = dontCheck (self.callPackage ./deps/memory-0.14.5.nix {});
+      # cryptonite = dontCheck (self.callPackage ./deps/cryptonite-0.23.nix {});
+      # foundation = dontCheck (self.callPackage ./deps/foundation-0.0.8.nix {});
+      # memory = dontCheck (self.callPackage ./deps/memory-0.14.5.nix {});
     };
   };
 

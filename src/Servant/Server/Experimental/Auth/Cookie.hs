@@ -78,7 +78,7 @@ module Servant.Server.Experimental.Auth.Cookie
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
-import Control.Arrow ((&&&), first, second)
+import Control.Arrow ((&&&), first)
 import Control.Monad
 import Control.Monad.Catch (MonadThrow (..), Exception)
 import Control.Monad.Except
@@ -341,9 +341,9 @@ instance (Eq s) => ServerKeySet (RenewableKeySet s p) where
     userState = snd
 
   removeKey RenewableKeySet {..} key = do
-    found <- liftIO $ atomicModifyIORef' rksState $ \state -> let
-      (keys', found) = second (not . null) . partition (/= key) . fst $ state
-      in (first (const keys') state, found)
+    found <- liftIO $ atomicModifyIORef' rksState $ \(keys, s) -> let
+      (found, keys') = first (not . null) . partition (== key) $ keys
+      in ((keys', s), found)
     when found $ (rkshRemoveKey rksHooks) rksParameters key
 
 -- | Create instance of 'RenewableKeySet'.
