@@ -2,6 +2,10 @@
 
 ## [HEAD]
 
+## [0.5.0.4] - 2017-05-27
+### Changed
+- Fixed dependencies' bounds.
+
 ## [0.5.0.3] - 2017-05-24
 ### Changed
 - Fixed dependencies' bounds.
@@ -113,7 +117,8 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.5.0.3...HEAD
+[HEAD]:    ../../compare/v0.5.0.4...HEAD
+[0.5.0.4]: ../../compare/v0.5.0.3...v0.5.0.4
 [0.5.0.3]: ../../compare/v0.5.0.2...v0.5.0.3
 [0.5.0.2]: ../../compare/v0.5.0.1...v0.5.0.2
 [0.5.0.1]: ../../compare/v0.5.0...v0.5.0.1
