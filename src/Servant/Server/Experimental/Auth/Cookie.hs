@@ -68,6 +68,9 @@ module Servant.Server.Experimental.Auth.Cookie
   , addSessionToErr
   , removeSessionFromErr
   , getSession
+#if MIN_VERSION_servant(0,9,0)
+  , getHeaderSession
+#endif
 
   , defaultAuthHandler
 
@@ -122,6 +125,7 @@ import Control.Applicative
 
 #if MIN_VERSION_servant(0,9,0)
 import Servant (ToHttpApiData (..))
+import Data.Text (Text)
 #else
 import Data.ByteString.Conversion (ToByteString (..))
 #endif
@@ -610,10 +614,32 @@ getSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   -> k                          -- ^ 'ServerKeySet' to use
   -> Request                    -- ^ The request
   -> m (Maybe (WithMetadata a)) -- ^ The result
-getSession acs@AuthCookieSettings {..} sk request = maybe
+getSession acs sk request = getSession' (requestHeaders request) acs sk
+
+#if MIN_VERSION_servant(0,9,0)
+-- | Get session from `Header "cookie" ByteString` in a route. Useful
+-- for checking authentication without denying access to route.
+--
+-- If 'Cookie' is missing, you get 'Nothing', but but if something is
+-- wrong with its format, 'getSession' can throw the same exceptions
+-- as 'decryptSession'.
+getHeaderSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
+  => AuthCookieSettings
+  -> k
+  -> Text
+  -> m (Maybe (WithMetadata a))
+getHeaderSession acs sk h = getSession' [(hCookie, toHeader h)] acs sk
+#endif
+
+getSession' :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
+  => RequestHeaders
+  -> AuthCookieSettings
+  -> k
+  -> m (Maybe (WithMetadata a))
+getSession' headers acs@AuthCookieSettings {..} sk = maybe
   (return Nothing)
   (liftM Just . decryptSession acs sk)
-  (parseSessionRequest acs $ requestHeaders request)
+  (parseSessionRequest acs headers)
 
 parseSession
   :: AuthCookieSettings

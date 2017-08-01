@@ -30,7 +30,7 @@ import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application, Request)
-import Servant (ReqBody, FormUrlEncoded)
+import Servant (ReqBody, FormUrlEncoded, Header)
 import Servant ((:<|>)(..), (:>), errBody, err403, toQueryParam)
 import Servant (Post, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
@@ -48,7 +48,7 @@ import qualified Data.ByteString.Char8 as BSC8
 import Control.Monad.IO.Class (liftIO)
 import Servant (Capture)
 #else
-import Servant (Headers, Header)
+import Servant (Headers)
 #endif
 
 #if MIN_VERSION_servant (0,9,0)
@@ -74,7 +74,7 @@ type Handler a = ExceptT ServantErr IO a
 -- | A structure that will be stored in the cookies to identify the user.
 data Account = Account
   { accUid       :: Int
-  , _accUsername :: String
+  , accUsername :: String
   , _accPassword :: String
   } deriving (Show, Eq, Generic)
 
@@ -148,6 +148,7 @@ type ExampleAPI =
   :<|> "login" :> ReqBody '[FormUrlEncoded] LoginForm :> Post '[HTML] (Cookied Markup)
   :<|> "logout" :> Get '[HTML] (Cookied Markup)
   :<|> "private" :> AuthProtect "cookie-auth" :> Get '[HTML] (Cookied Markup)
+  :<|> "whoami" :> Header "cookie" T.Text :> Get '[HTML] Markup
   :<|> "keys" :> (
          Get '[HTML] Markup
     :<|> "add" :> Get '[HTML] Markup
@@ -182,6 +183,9 @@ server settings _generateKey rs sks =
   :<|> serveLoginPost
   :<|> serveLogout
   :<|> servePrivate
+#if MIN_VERSION_servant(0,9,1)
+  :<|> serveWhoami
+#endif
   :<|> serveKeys where
 
   addSession' = addSession
@@ -203,6 +207,14 @@ server settings _generateKey rs sks =
 
 #if MIN_VERSION_servant(0,9,1)
   servePrivate = cookied settings rs sks servePrivate'
+
+  serveWhoami Nothing = return $ whoamiPage Nothing
+  serveWhoami (Just h) = do
+    mwm <- getHeaderSession settings sks h `catch` handleEx
+    return $ whoamiPage $ wmData <$> mwm
+    where
+      handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata Account))
+      handleEx _ex = return Nothing
 #else
   servePrivate = return . servePrivate' . wmData
 #endif
@@ -270,6 +282,10 @@ pageMenu = do
   void " "
   H.a ! A.href "/private" $ "private"
   void " "
+#if MIN_VERSION_servant(0,9,1)
+  H.a ! A.href "/whoami"  $ "whoami"
+  void " "
+#endif
   H.a ! A.href "/keys"    $ "keys"
   H.hr
 
@@ -308,6 +324,17 @@ privatePage uid username' password' = H.docTypeHtml $ do
     H.p $ H.b "password: " >> H.toHtml password'
     H.hr
     H.a ! A.href "/logout" $ "logout"
+
+#if MIN_VERSION_servant(0,9,1)
+whoamiPage :: Maybe Account -> Markup
+whoamiPage macc = H.docTypeHtml $ do
+  H.head (H.title "whoami")
+  H.body $ do
+    pageMenu
+    case macc of
+      Nothing  -> H.p $ H.b "Not authenticated"
+      Just acc -> H.p $ H.b "username: " >> H.toHtml (accUsername acc)
+#endif
 
 keysPage :: Bool -> (BSC8.ByteString, [BSC8.ByteString]) -> Markup
 keysPage showControls (k, ks) = H.docTypeHtml $ do
