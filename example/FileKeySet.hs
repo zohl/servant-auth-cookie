@@ -18,7 +18,7 @@ module FileKeySet (
 import Prelude ()
 import Prelude.Compat
 import Control.Monad.Catch (MonadThrow)
-import Control.Monad
+import Control.Monad (when)
 import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Time.Clock (UTCTime(..), getCurrentTime)
