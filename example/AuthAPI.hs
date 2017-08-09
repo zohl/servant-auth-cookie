@@ -22,7 +22,7 @@ module AuthAPI (
 import Prelude ()
 import Prelude.Compat
 import Control.Monad.Catch (catch)
-import Control.Monad
+import Control.Monad (void, unless, when)
 import Data.ByteString.Lazy (fromStrict)
 import Data.Default (def)
 import Data.List (find)
