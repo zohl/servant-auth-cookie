@@ -12,18 +12,21 @@
   paper \"A Secure Cookie Protocol\" by Alex Liu et al.
 -}
 
-{-# LANGUAGE CPP                 #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE DeriveDataTypeable  #-}
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE GADTs               #-}
-{-# LANGUAGE KindSignatures      #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections       #-}
-{-# LANGUAGE TypeFamilies        #-}
-{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+
 
 module Servant.Server.Experimental.Auth.Cookie
   ( CipherAlgorithm
@@ -34,6 +37,7 @@ module Servant.Server.Experimental.Auth.Cookie
   , WithMetadata (..)
 #if MIN_VERSION_servant(0,9,1)
   , Cookied
+  , CookiedWrapper
   , cookied
 #endif
 
@@ -687,16 +691,52 @@ renderSession acs@AuthCookieSettings {..} rs sk sessionData = do
 
 
 #if MIN_VERSION_servant(0,9,1)
--- | Wrapper for an implementation of an endpoint to make it automatically
--- renew the cookies.
-cookied :: (Serialize a, ServerKeySet k)
-  => AuthCookieSettings                        -- ^ Options, see 'AuthCookieSettings'
-  -> RandomSource                              -- ^ Random source to use
-  -> k                                         -- ^ Instance of 'ServerKeySet' to use
-  -> (a -> r)                                  -- ^ Implementation of an endpoint
-  -> ((WithMetadata a) -> Handler (Cookied r)) -- ^ "Cookied" endpoint
-cookied acs rs k f = \(WithMetadata {..}) ->
-  (if wmRenew then addSession acs rs k wmData else (return . noHeader)) $ f wmData
+-- | Type for curried 'cookied' function (with fixed settings, random
+-- source, keyset and session type).
+type CookiedWrapper c = forall f r. (CookiedWrapperClass f r c) => f -> r
+
+-- | Wrapper for endpoints that use cookies. It transforms function of type:
+-- >>> q1 -> q2 -> ... -> Session -> ... -> qN -> Handler r
+-- into
+-- >>> q1 -> q2 -> ... -> WithMetadata Session -> ... qN -> Handler (Cookied r)
+--
+-- Non-session variables number can be arbitrary. It supposed to be
+-- used in tandem with 'Cookied' type.
+--
+-- Using this wrapper requires FlexibleContexts extention to be turned
+-- on. In case of curring 'cookied' function, it's highly recommended
+-- to provide signature for this (see 'CookiedWrapper').
+cookied
+  :: (ServerKeySet k, Serialize c)
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> RandomSource       -- ^ Random source to use
+  -> k                  -- ^ Instance of 'ServerKeySet' to use
+  -> Proxy c            -- ^ Type of session
+  -> CookiedWrapper c   -- ^ Wrapper that transforms given functions.
+cookied acs rs k p = wrapCookied (acs, rs, k, p) Nothing
+
+class CookiedWrapperClass f r c where
+  wrapCookied
+    :: (ServerKeySet k)
+    => (AuthCookieSettings, RandomSource, k, Proxy c)
+    -> Maybe c
+    -> f
+    -> r
+
+instance (Serialize c)
+         => CookiedWrapperClass (Handler b) (Handler (Cookied b)) c where
+  wrapCookied _               Nothing  = fmap noHeader
+  wrapCookied (acs, rs, k, _) (Just s) = (>>= addSession acs rs k s)
+
+instance (Serialize c, CookiedWrapperClass b b' c)
+         => CookiedWrapperClass (c -> b) (WithMetadata c -> b') c where
+  wrapCookied env _ f = \WithMetadata {..} -> let
+    mc = if wmRenew then (Just wmData) else Nothing
+    in wrapCookied env mc (f wmData)
+
+instance (Serialize c, CookiedWrapperClass b b' c)
+         => CookiedWrapperClass (a -> b) (a -> b') c where
+  wrapCookied env ms f = wrapCookied env ms . f
 #endif
 
 ----------------------------------------------------------------------------

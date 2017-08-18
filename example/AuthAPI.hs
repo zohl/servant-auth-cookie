@@ -1,13 +1,14 @@
-{-# LANGUAGE CPP                   #-}
-{-# LANGUAGE DataKinds             #-}
-{-# LANGUAGE DeriveGeneric         #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE RecordWildCards       #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE TypeOperators         #-}
-{-# LANGUAGE OverloadedLists       #-}
-{-# LANGUAGE TupleSections         #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module AuthAPI (
   ExampleAPI
@@ -206,7 +207,7 @@ server settings _generateKey rs sks =
   serveLogout = removeSession settings (redirectPage "/" "Session has been terminated")
 
 #if MIN_VERSION_servant(0,9,1)
-  servePrivate = cookied settings rs sks servePrivate'
+  servePrivate = cookied settings rs sks (Proxy :: Proxy Account) servePrivate'
 
   serveWhoami Nothing = return $ whoamiPage Nothing
   serveWhoami (Just h) = do
@@ -217,8 +218,11 @@ server settings _generateKey rs sks =
       handleEx _ex = return Nothing
 #else
   servePrivate = return . servePrivate' . wmData
-#endif
   servePrivate' (Account uid u p) = privatePage uid u p
+#endif
+
+  servePrivate' :: Account -> Handler Markup
+  servePrivate' (Account uid u p) = return $ privatePage uid u p
 
 #if MIN_VERSION_servant(0,9,1)
   serveKeys = (keysPage True <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey
