@@ -34,7 +34,8 @@ module Servant.Server.Experimental.Auth.Cookie
   , Cookie (..)
   , AuthCookieException (..)
 
-  , WithMetadata (..)
+  , PayloadWrapper(..)
+  , ExtendedPayloadWrapper(..)
 #if MIN_VERSION_servant(0,9,1)
   , Cookied
   , CookiedWrapper
@@ -159,13 +160,34 @@ type CipherAlgorithm c = c -> IV c -> ByteString -> ByteString
 -- | A type family that maps user-defined data to 'AuthServerData'.
 type family AuthCookieData
 
--- | Wrapper for cookies and sessions to keep some related metadata.
-data WithMetadata a = WithMetadata
-  { wmData  :: a     -- ^ Value itself
-  , wmRenew :: Bool  -- ^ Whether we should renew cookies/session
+-- | Wrapper for session value that goes into cookies' payload.
+data PayloadWrapper a = PayloadWrapper {
+    pwSession    :: a
+  , pwExpiration :: UTCTime
   }
 
-type instance AuthServerData (AuthProtect "cookie-auth") = WithMetadata AuthCookieData
+instance (Serialize a) => Serialize (PayloadWrapper a) where
+  put PayloadWrapper {..} = do
+    put pwSession
+    put (toModifiedJulianDay . utctDay $ pwExpiration)
+    put (diffTimeToPicoseconds . utctDayTime $ pwExpiration)
+
+  get = do
+    pwSession    <- get
+    pwExpiration <- UTCTime
+      <$> (ModifiedJulianDay <$> get)
+      <*> (picosecondsToDiffTime <$> get)
+    return PayloadWrapper {..}
+
+-- | Wrapper for session value with metadata that doesn't go into payload.
+data ExtendedPayloadWrapper a = ExtendedPayloadWrapper {
+    epwSession    :: a
+  , epwExpiration :: UTCTime
+  , epwRenew      :: Bool
+  }
+
+
+type instance AuthServerData (AuthProtect "cookie-auth") = ExtendedPayloadWrapper AuthCookieData
 
 -- | Cookie representation.
 data Cookie = Cookie
@@ -422,7 +444,7 @@ encryptCookie :: (MonadIO m, MonadThrow m, ServerKeySet k)
   -> k                  -- ^ Instance of 'ServerKeySet' to use
   -> Cookie             -- ^ The 'Cookie' to encrypt
   -> m (Tagged EncryptedCookie ByteString)  -- ^ Encrypted 'Cookie' is form of 'ByteString'
-encryptCookie AuthCookieSettings {..} sks cookie = do
+encryptCookie AuthCookieSettings {..} sks cookie = error "TODO" {- do
   let iv = cookieIV cookie
       expiration = BSC8.pack $ formatTime
         defaultTimeLocale
@@ -441,6 +463,7 @@ encryptCookie AuthCookieSettings {..} sks cookie = do
     putByteString expiration
     putByteString payload
     putByteString mac
+-}
 
 -- | Decrypt a 'Cookie' from 'ByteString'.
 --
@@ -457,8 +480,8 @@ decryptCookie :: (MonadIO m, MonadThrow m, ServerKeySet k)
   => AuthCookieSettings                 -- ^ Options, see 'AuthCookieSettings'
   -> k                                  -- ^ Instance of 'ServerKeySet' to use
   -> Tagged EncryptedCookie ByteString  -- ^ The 'ByteString' to decrypt
-  -> m (WithMetadata Cookie)            -- ^ The decrypted 'Cookie'
-decryptCookie AuthCookieSettings {..} sks (Tagged s) = do
+  -> m (ExtendedPayloadWrapper Cookie)  -- ^ The decrypted 'Cookie'
+decryptCookie AuthCookieSettings {..} sks (Tagged s) = error "TODO" {- do
   currentTime <- liftIO getCurrentTime
   let ivSize  = blockSize (unProxy acsCipher)
       expSize =
@@ -497,7 +520,7 @@ decryptCookie AuthCookieSettings {..} sks (Tagged s) = do
     { wmData = cookie
     , wmRenew = renew
     }
-
+-}
 ----------------------------------------------------------------------------
 -- Encrypt/decrypt session
 
@@ -509,7 +532,7 @@ encryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   -> k                  -- ^ Instance of 'ServerKeySet' to use
   -> a                  -- ^ Session value
   -> m (Tagged SerializedEncryptedCookie ByteString)  -- ^ Serialized and encrypted session
-encryptSession acs@AuthCookieSettings {..} randomSource sk session = do
+encryptSession acs@AuthCookieSettings {..} randomSource sk session = error "TODO" {- do
   iv <- getRandomBytes randomSource (blockSize $ unProxy acsCipher)
   expirationTime <- liftM (addUTCTime acsMaxAge) (liftIO getCurrentTime)
   let payload = runPut (put session)
@@ -522,22 +545,22 @@ encryptSession acs@AuthCookieSettings {..} randomSource sk session = do
     { cookieIV             = iv
     , cookieExpirationTime = expirationTime
     , cookiePayload        = BS.concat [payload, padding] })
-
+-}
 -- | Unpack session value from a cookie. The function can throw the same
 -- exceptions as 'decryptCookie'.
 decryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings                           -- ^ Options, see 'AuthCookieSettings'
   -> k                                            -- ^ Instance of 'ServerKeySet' to use
   -> Tagged SerializedEncryptedCookie ByteString  -- ^ Cookie in binary form
-  -> m (WithMetadata a)                           -- ^ Unpacked session value
-decryptSession acs@AuthCookieSettings {..} sks s =
+  -> m (ExtendedPayloadWrapper a)                 -- ^ Unpacked session value
+decryptSession acs@AuthCookieSettings {..} sks s = error "TODO" {-
   let fromRight = either (throwM . SessionDeserializationFailed) return
   in fromRight (base64Decode s) >>=
      decryptCookie acs sks      >>=
      \w -> do
         session <- fromRight . runGet get . cookiePayload $ wmData w
         return w { wmData = session }
-
+-}
 ----------------------------------------------------------------------------
 -- Add/remove session
 
@@ -614,10 +637,10 @@ expiredCookie AuthCookieSettings{..} = (toByteString . renderCookies) cookies
 -- get 'Nothing', but if something is wrong with its format, 'getSession'
 -- can throw the same exceptions as 'decryptSession'.
 getSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
-  => AuthCookieSettings         -- ^ Options, see 'AuthCookieSettings'
-  -> k                          -- ^ 'ServerKeySet' to use
-  -> Request                    -- ^ The request
-  -> m (Maybe (WithMetadata a)) -- ^ The result
+  => AuthCookieSettings                   -- ^ Options, see 'AuthCookieSettings'
+  -> k                                    -- ^ 'ServerKeySet' to use
+  -> Request                              -- ^ The request
+  -> m (Maybe (ExtendedPayloadWrapper a)) -- ^ The result
 getSession acs sk request = getSession' (requestHeaders request) acs sk
 
 #if MIN_VERSION_servant(0,9,0)
@@ -631,7 +654,7 @@ getHeaderSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings
   -> k
   -> Text
-  -> m (Maybe (WithMetadata a))
+  -> m (Maybe (ExtendedPayloadWrapper a))
 getHeaderSession acs sk h = getSession' [(hCookie, toHeader h)] acs sk
 #endif
 
@@ -639,7 +662,7 @@ getSession' :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => RequestHeaders
   -> AuthCookieSettings
   -> k
-  -> m (Maybe (WithMetadata a))
+  -> m (Maybe (ExtendedPayloadWrapper a))
 getSession' headers acs@AuthCookieSettings {..} sk = maybe
   (return Nothing)
   (liftM Just . decryptSession acs sk)
@@ -698,7 +721,7 @@ type CookiedWrapper c = forall f r. (CookiedWrapperClass f r c) => f -> r
 -- | Wrapper for endpoints that use cookies. It transforms function of type:
 -- >>> q1 -> q2 -> ... -> Session -> ... -> qN -> Handler r
 -- into
--- >>> q1 -> q2 -> ... -> WithMetadata Session -> ... qN -> Handler (Cookied r)
+-- >>> q1 -> q2 -> ... -> ExtendedPayloadWrapper Session -> ... qN -> Handler (Cookied r)
 --
 -- Non-session variables number can be arbitrary. It supposed to be
 -- used in tandem with 'Cookied' type.
@@ -729,10 +752,10 @@ instance (Serialize c)
   wrapCookied (acs, rs, k, _) (Just s) = (>>= addSession acs rs k s)
 
 instance (Serialize c, CookiedWrapperClass b b' c)
-         => CookiedWrapperClass (c -> b) (WithMetadata c -> b') c where
-  wrapCookied env _ f = \WithMetadata {..} -> let
-    mc = if wmRenew then (Just wmData) else Nothing
-    in wrapCookied env mc (f wmData)
+         => CookiedWrapperClass (c -> b) (ExtendedPayloadWrapper c -> b') c where
+  wrapCookied env _ f = \ExtendedPayloadWrapper {..} -> let
+    mc = if epwRenew then (Just epwSession) else Nothing
+    in wrapCookied env mc (f epwSession)
 
 instance (Serialize c, CookiedWrapperClass b b' c)
          => CookiedWrapperClass (a -> b) (a -> b') c where
@@ -744,9 +767,9 @@ instance (Serialize c, CookiedWrapperClass b b' c)
 
 -- | Cookie authentication handler.
 defaultAuthHandler :: (Serialize a, ServerKeySet k)
-  => AuthCookieSettings                   -- ^ Options, see 'AuthCookieSettings'
-  -> k                                    -- ^ Instance of 'ServerKeySet' to use
-  -> AuthHandler Request (WithMetadata a) -- ^ The result
+  => AuthCookieSettings                             -- ^ Options, see 'AuthCookieSettings'
+  -> k                                              -- ^ Instance of 'ServerKeySet' to use
+  -> AuthHandler Request (ExtendedPayloadWrapper a) -- ^ The result
 defaultAuthHandler acs sk = mkAuthHandler $ \request -> do
   msession <- liftIO (getSession acs sk request)
   maybe (throwError err403) return msession
