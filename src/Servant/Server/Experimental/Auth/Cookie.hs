@@ -31,7 +31,6 @@
 module Servant.Server.Experimental.Auth.Cookie
   ( CipherAlgorithm
   , AuthCookieData
-  , Cookie (..)
   , AuthCookieException (..)
 
   , PayloadWrapper(..)
@@ -189,12 +188,29 @@ data ExtendedPayloadWrapper a = ExtendedPayloadWrapper {
 
 type instance AuthServerData (AuthProtect "cookie-auth") = ExtendedPayloadWrapper AuthCookieData
 
--- | Cookie representation.
-data Cookie = Cookie
-  { cookieIV             :: ByteString -- ^ The initialization vector
-  , cookieExpirationTime :: UTCTime    -- ^ The cookie's expiration time
-  , cookiePayload        :: ByteString -- ^ The payload
-  } deriving (Eq, Show)
+
+-- | Representation of a cookie.
+data Cookie = Cookie {
+    cookieIV      :: Tagged IVBytes      ByteString
+  , cookiePayload :: Tagged PayloadBytes ByteString
+  , cookiePadding :: Tagged PaddingBytes ByteString
+  , cookieMAC     :: Tagged MACBytes     ByteString
+  }
+
+instance Serialize Cookie where
+  put Cookie {..} = do
+    put $ unTagged cookieIV
+    put $ unTagged cookiePayload
+    put $ unTagged cookiePadding
+    put $ unTagged cookieMAC
+
+  get = do
+    cookieIV       <- Tagged <$> get
+    cookiePayload  <- Tagged <$> get
+    cookiePadding  <- Tagged <$> get
+    cookieMAC      <- Tagged <$> get
+    return Cookie {..}
+
 
 -- | A newtype wrapper over 'ByteString'
 newtype EncryptedSession = EncryptedSession ByteString
@@ -248,6 +264,12 @@ data EncryptedCookie
 
 -- | Tag for base64 serialized and encrypted cookie
 data SerializedEncryptedCookie
+
+
+data IVBytes
+data PayloadBytes
+data PaddingBytes
+data MACBytes
 
 base64Encode :: Tagged EncryptedCookie ByteString -> Tagged SerializedEncryptedCookie ByteString
 base64Encode = retag . fmap Base64.encode
