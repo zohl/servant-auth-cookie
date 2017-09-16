@@ -265,11 +265,14 @@ data EncryptedCookie
 -- | Tag for base64 serialized and encrypted cookie
 data SerializedEncryptedCookie
 
+data ServerKeyBytes
+data CookieKeyBytes
 
 data IVBytes
 data PayloadBytes
 data PaddingBytes
 data MACBytes
+
 
 base64Encode :: Tagged EncryptedCookie ByteString -> Tagged SerializedEncryptedCookie ByteString
 base64Encode = retag . fmap Base64.encode
@@ -832,21 +835,60 @@ mkProperKey kss s = do
         else return l
   return (BS.take plen s)
 
+-- | Derives key for a cookie based on server key and IV.
+mkCookieKey
+  :: (MonadThrow m, HashAlgorithm h, BlockCipher c)
+  => Proxy c
+  -> Proxy h
+  -> Tagged ServerKeyBytes ByteString
+  -> Tagged IVBytes ByteString
+  -> m (Tagged CookieKeyBytes ByteString)
+mkCookieKey c h (Tagged sk) (Tagged iv) = Tagged <$> mkProperKey (cipherKeySize (unProxy c)) (sign h sk iv)
+
+-- | Generates random initial vector.
+mkIV :: (MonadIO m, BlockCipher c)
+  => RandomSource
+  -> Proxy c
+  -> m (Tagged IVBytes ByteString)
+mkIV rs c = Tagged <$> getRandomBytes rs (blockSize (unProxy c))
+
+-- | Generates padding of random bytes to align payload's length.
+mkPadding :: (MonadIO m, BlockCipher c)
+  => RandomSource
+  -> Proxy c
+  -> Tagged PayloadBytes ByteString
+  -> m (Tagged PaddingBytes ByteString)
+mkPadding rs c (Tagged payload) = Tagged <$> getRandomBytes rs l where
+  bs = blockSize (unProxy c)
+  n  = BS.length payload
+  l  = (bs - (n `rem` bs)) `rem` bs
+
+-- | Generates cookie's signature.
+mkMAC :: (HashAlgorithm h)
+  => Proxy h
+  -> Tagged ServerKeyBytes ByteString
+  -> Cookie
+  -> Tagged MACBytes ByteString
+mkMAC h (Tagged sk) Cookie {..} = Tagged . sign h sk $
+       unTagged cookieIV
+    <> unTagged cookiePayload
+    <> unTagged cookiePadding
+
 -- | Applies given encryption or decryption algorithm to given data.
 applyCipherAlgorithm :: forall c m. (BlockCipher c, MonadThrow m)
-  => CipherAlgorithm c -- ^ The cipher algorithm to apply
-  -> ByteString        -- ^ 'ByteString' from which to create 'IV'
-  -> ByteString        -- ^ Proper key
-  -> ByteString        -- ^ Cookie payload
-  -> m ByteString      -- ^ The resulting 'ByteString'
-applyCipherAlgorithm f ivRaw keyRaw msg = do
+  => CipherAlgorithm c
+  -> Tagged IVBytes ByteString
+  -> Tagged CookieKeyBytes ByteString
+  -> Tagged PayloadBytes ByteString
+  -> m (Tagged PayloadBytes ByteString)
+applyCipherAlgorithm f (Tagged ivRaw) (Tagged keyRaw) (Tagged msg) = do
   iv <- case makeIV ivRaw :: Maybe (IV c) of
     Nothing -> throwM (CannotMakeIV ivRaw)
     Just  x -> return x
   key <- case cipherInit keyRaw :: CryptoFailable c of
     CryptoFailed err -> throwM (BadProperKey err)
     CryptoPassed   x -> return x
-  (return . BA.convert) (f key iv msg)
+  (return . Tagged . BA.convert) (f key iv msg)
 
 -- | Return bottom of type provided as 'Proxy' tag.
 
