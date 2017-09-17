@@ -103,7 +103,7 @@ import Data.List (partition)
 import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
-import Data.Serialize
+import Data.Serialize (Serialize(..))
 import Data.Time
 import Data.Tagged (Tagged (..), retag)
 import Data.Typeable
@@ -121,6 +121,7 @@ import qualified Data.ByteArray         as BA
 import qualified Data.ByteString        as BS
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8  as BSC8
+import qualified Data.Serialize as Serialize (encode, decode)
 import qualified Network.HTTP.Types as N(Header)
 
 #if !MIN_VERSION_base(4,8,0)
@@ -281,6 +282,12 @@ base64Decode
   :: Tagged SerializedEncryptedCookie ByteString
   -> Either String (Tagged EncryptedCookie ByteString)
 base64Decode = fmap Tagged . Base64.decode . unTagged
+
+cerealEncode :: (Serialize a) => a -> Tagged b ByteString
+cerealEncode = Tagged . Serialize.encode
+
+cerealDecode :: (Serialize a) => Tagged b ByteString -> Either String a
+cerealDecode = Serialize.decode . unTagged
 
 ----------------------------------------------------------------------------
 -- Random source
