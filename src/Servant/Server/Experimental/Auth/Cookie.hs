@@ -61,7 +61,6 @@ module Servant.Server.Experimental.Auth.Cookie
   , EncryptedSession (..)
   , emptyEncryptedSession
 
-  , encryptCookie
   , decryptCookie
 
   , encryptSession
@@ -463,40 +462,6 @@ instance Default AuthCookieSettings where
 ----------------------------------------------------------------------------
 -- Encrypt/decrypt cookie
 
--- | Encrypt given 'Cookie' with server key.
---
--- The function can throw the following exceptions (of type
--- 'AuthCookieException'):
---
---     * 'TooShortProperKey'
---     * 'CannotMakeIV'
---     * 'BadProperKey'
-encryptCookie :: (MonadIO m, MonadThrow m, ServerKeySet k)
-  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> k                  -- ^ Instance of 'ServerKeySet' to use
-  -> Cookie             -- ^ The 'Cookie' to encrypt
-  -> m (Tagged EncryptedCookie ByteString)  -- ^ Encrypted 'Cookie' is form of 'ByteString'
-encryptCookie AuthCookieSettings {..} sks cookie = error "TODO" {- do
-  let iv = cookieIV cookie
-      expiration = BSC8.pack $ formatTime
-        defaultTimeLocale
-        acsExpirationFormat
-        (cookieExpirationTime cookie)
-  (serverKey, _) <- getKeys sks
-  key <- mkProperKey
-    (cipherKeySize $ unProxy acsCipher)
-    (sign acsHashAlgorithm serverKey $ iv <> expiration)
-  payload <- applyCipherAlgorithm acsEncryptAlgorithm
-    iv key (cookiePayload cookie)
-  let mac = sign acsHashAlgorithm serverKey
-        (BS.concat [iv, expiration, payload])
-  return . Tagged . runPut $ do
-    putByteString iv
-    putByteString expiration
-    putByteString payload
-    putByteString mac
--}
-
 -- | Decrypt a 'Cookie' from 'ByteString'.
 --
 -- The function can throw the following exceptions (of type
@@ -556,28 +521,31 @@ decryptCookie AuthCookieSettings {..} sks (Tagged s) = error "TODO" {- do
 ----------------------------------------------------------------------------
 -- Encrypt/decrypt session
 
--- | Pack session object into a cookie. The function can throw the same
--- exceptions as 'encryptCookie'.
+-- | Pack session object into a cookie.
+--
+-- The function can throw the following exceptions (of type
+-- 'AuthCookieException'):
+--
+--     * 'TooShortProperKey'
+--     * 'CannotMakeIV'
+--     * 'BadProperKey'
 encryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> RandomSource       -- ^ Random source to use
   -> k                  -- ^ Instance of 'ServerKeySet' to use
   -> a                  -- ^ Session value
   -> m (Tagged SerializedEncryptedCookie ByteString)  -- ^ Serialized and encrypted session
-encryptSession acs@AuthCookieSettings {..} randomSource sk session = error "TODO" {- do
-  iv <- getRandomBytes randomSource (blockSize $ unProxy acsCipher)
-  expirationTime <- liftM (addUTCTime acsMaxAge) (liftIO getCurrentTime)
-  let payload = runPut (put session)
-  padding <-
-    let bs = blockSize (unProxy acsCipher)
-        n  = BS.length payload
-        l  = (bs - (n `rem` bs)) `rem` bs
-    in getRandomBytes randomSource l
-  base64Encode `liftM` encryptCookie acs sk (Cookie
-    { cookieIV             = iv
-    , cookieExpirationTime = expirationTime
-    , cookiePayload        = BS.concat [payload, padding] })
--}
+encryptSession acs@AuthCookieSettings {..} rs sks pwSession = do
+  pwExpiration  <- liftM (addUTCTime acsMaxAge) (liftIO getCurrentTime)
+  cookieIV      <- mkIV rs acsCipher
+  sk            <- (Tagged . fst) <$> getKeys sks
+  key           <- mkCookieKey acsCipher acsHashAlgorithm sk cookieIV
+  cookiePayload <- applyCipherAlgorithm acsEncryptAlgorithm cookieIV key (cerealEncode PayloadWrapper {..})
+  cookiePadding <- mkPadding rs acsCipher cookiePayload
+  let cookieMAC =  mkMAC acsHashAlgorithm sk Cookie {cookieMAC = "", ..}
+  return . base64Encode . cerealEncode $ Cookie {..}
+
+
 -- | Unpack session value from a cookie. The function can throw the same
 -- exceptions as 'decryptCookie'.
 decryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
