@@ -61,8 +61,6 @@ module Servant.Server.Experimental.Auth.Cookie
   , EncryptedSession (..)
   , emptyEncryptedSession
 
-  , decryptCookie
-
   , encryptSession
   , decryptSession
 
@@ -245,8 +243,6 @@ data AuthCookieException
     -- this constructor: minimal key length, actual key length.
   | IncorrectMAC ByteString
     -- ^ Thrown when Message Authentication Code (MAC) is not correct.
-  | CannotParseExpirationTime ByteString
-    -- ^ Thrown when expiration time cannot be parsed.
   | CookieExpired UTCTime UTCTime
     -- ^ Thrown when 'Cookie' has expired. Arguments of the constructor:
     -- expiration time, actual time.
@@ -460,65 +456,6 @@ instance Default AuthCookieSettings where
     , acsDecryptAlgorithm = ctrCombine }
 
 ----------------------------------------------------------------------------
--- Encrypt/decrypt cookie
-
--- | Decrypt a 'Cookie' from 'ByteString'.
---
--- The function can throw the following exceptions (of type
--- 'AuthCookieException'):
---
---     * 'TooShortProperKey'
---     * 'CannotMakeIV'
---     * 'BadProperKey'
---     * 'IncorrectMAC'
---     * 'CannotParseExpirationTime'
---     * 'CookieExpired'
-decryptCookie :: (MonadIO m, MonadThrow m, ServerKeySet k)
-  => AuthCookieSettings                 -- ^ Options, see 'AuthCookieSettings'
-  -> k                                  -- ^ Instance of 'ServerKeySet' to use
-  -> Tagged EncryptedCookie ByteString  -- ^ The 'ByteString' to decrypt
-  -> m (ExtendedPayloadWrapper Cookie)  -- ^ The decrypted 'Cookie'
-decryptCookie AuthCookieSettings {..} sks (Tagged s) = error "TODO" {- do
-  currentTime <- liftIO getCurrentTime
-  let ivSize  = blockSize (unProxy acsCipher)
-      expSize =
-        length (formatTime defaultTimeLocale acsExpirationFormat currentTime)
-      payloadSize = BS.length s - ivSize - expSize -
-        hashDigestSize (unProxy acsHashAlgorithm)
-      butMacSize = ivSize + expSize + payloadSize
-      (iv,            s0) = BS.splitAt ivSize s
-      (expirationRaw, s1) = BS.splitAt expSize s0
-      (payloadRaw,   mac) = BS.splitAt payloadSize s1
-      checkMac sk = mac == sign acsHashAlgorithm sk (BS.take butMacSize s)
-
-  (currentKey, rotatedKeys) <- getKeys sks
-  (serverKey, renew) <- if checkMac currentKey
-    then return (currentKey, False)
-    else liftM (,True) $ maybe
-      (throwM $ IncorrectMAC mac)
-      (return)
-      (listToMaybe . map fst . filter snd . map (id &&& checkMac) $ rotatedKeys)
-
-  expirationTime <-
-    maybe (throwM $ CannotParseExpirationTime expirationRaw) return $
-      parseTimeM False defaultTimeLocale acsExpirationFormat
-        (BSC8.unpack expirationRaw)
-  when (currentTime >= expirationTime) $
-    throwM (CookieExpired expirationTime currentTime)
-  key <- mkProperKey
-    (cipherKeySize (unProxy acsCipher))
-    (sign acsHashAlgorithm serverKey $ BS.take (ivSize + expSize) s)
-  payload <- applyCipherAlgorithm acsDecryptAlgorithm iv key payloadRaw
-  let cookie = Cookie
-        { cookieIV             = iv
-        , cookieExpirationTime = expirationTime
-        , cookiePayload        = payload }
-  return WithMetadata
-    { wmData = cookie
-    , wmRenew = renew
-    }
--}
-----------------------------------------------------------------------------
 -- Encrypt/decrypt session
 
 -- | Pack session object into a cookie.
@@ -535,7 +472,7 @@ encryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   -> k                  -- ^ Instance of 'ServerKeySet' to use
   -> a                  -- ^ Session value
   -> m (Tagged SerializedEncryptedCookie ByteString)  -- ^ Serialized and encrypted session
-encryptSession acs@AuthCookieSettings {..} rs sks pwSession = do
+encryptSession AuthCookieSettings {..} rs sks pwSession = do
   pwExpiration  <- liftM (addUTCTime acsMaxAge) (liftIO getCurrentTime)
   cookieIV      <- mkIV rs acsCipher
   sk            <- (Tagged . fst) <$> getKeys sks
@@ -548,19 +485,43 @@ encryptSession acs@AuthCookieSettings {..} rs sks pwSession = do
 
 -- | Unpack session value from a cookie. The function can throw the same
 -- exceptions as 'decryptCookie'.
-decryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
-  => AuthCookieSettings                           -- ^ Options, see 'AuthCookieSettings'
-  -> k                                            -- ^ Instance of 'ServerKeySet' to use
-  -> Tagged SerializedEncryptedCookie ByteString  -- ^ Cookie in binary form
-  -> m (ExtendedPayloadWrapper a)                 -- ^ Unpacked session value
-decryptSession acs@AuthCookieSettings {..} sks s = error "TODO" {-
-  let fromRight = either (throwM . SessionDeserializationFailed) return
-  in fromRight (base64Decode s) >>=
-     decryptCookie acs sks      >>=
-     \w -> do
-        session <- fromRight . runGet get . cookiePayload $ wmData w
-        return w { wmData = session }
--}
+--
+-- The function can throw the following exceptions (of type
+-- 'AuthCookieException'):
+--
+--     * 'TooShortProperKey'
+--     * 'CannotMakeIV'
+--     * 'BadProperKey'
+--     * 'IncorrectMAC'
+--     * 'CookieExpired'
+decryptSession :: (MonadIO m, MonadThrow m, ServerKeySet k, Serialize a)
+  => AuthCookieSettings                 -- ^ Options, see 'AuthCookieSettings'
+  -> k                                  -- ^ Instance of 'ServerKeySet' to use
+  -> Tagged SerializedEncryptedCookie ByteString -- ^ The 'ByteString' to decrypt
+  -> m (ExtendedPayloadWrapper a)       -- ^ The decrypted 'Cookie'
+decryptSession AuthCookieSettings {..} sks s = do
+  let fromRight = either (throwM . SessionDeserializationFailed . show) return
+
+  Cookie {..} <- fromRight (base64Decode s) >>= fromRight . cerealDecode
+  let checkMAC sk = cookieMAC == mkMAC acsHashAlgorithm sk Cookie {..}
+  (sk, epwRenew) <- getKeys sks >>= \(currentKey, rotatedKeys) -> maybe
+      (throwM $ IncorrectMAC (unTagged cookieMAC))
+      (return)
+      . listToMaybe
+      . filter (checkMAC . fst)
+      . map (first Tagged)
+      $ ((currentKey, False):(map (,True) rotatedKeys))
+  key <- mkCookieKey acsCipher acsHashAlgorithm sk cookieIV
+  PayloadWrapper {..} <- applyCipherAlgorithm acsDecryptAlgorithm cookieIV key cookiePayload
+                     >>= fromRight . cerealDecode
+
+  (liftIO getCurrentTime) >>= \t -> when (t >= pwExpiration) $ throwM (CookieExpired pwExpiration t)
+
+  return ExtendedPayloadWrapper {
+      epwSession    = pwSession
+    , epwExpiration = pwExpiration
+    , ..}
+
 ----------------------------------------------------------------------------
 -- Add/remove session
 
