@@ -702,22 +702,29 @@ cookied acs rs k p = wrapCookied (acs, rs, k, p) Nothing
 class CookiedWrapperClass f r c where
   wrapCookied
     :: (ServerKeySet k)
-    => (AuthCookieSettings, RandomSource, k, Proxy c)
-    -> Maybe c
-    -> f
-    -> r
+    => (AuthCookieSettings, RandomSource, k, Proxy c) -- ^ Environment
+    -> Maybe (PayloadWrapper c)                       -- ^ Session value (if found)
+    -> f                                              -- ^ Tail of function to process
+    -> r                                              -- ^ Wrapped function
 
+-- When no arguments left: add session header to result.
 instance (Serialize c)
          => CookiedWrapperClass (Handler b) (Handler (Cookied b)) c where
-  wrapCookied _               Nothing  = fmap noHeader
-  wrapCookied (acs, rs, k, _) (Just s) = (>>= addSession acs rs k s)
+  wrapCookied _               Nothing                    = fmap noHeader
+  wrapCookied (acs, rs, k, _) (Just PayloadWrapper {..}) = (>>= addSession acs rs k pwSession)
 
+-- When the next argument is the one that should wrapped: wrap it and carry it's value to the result.
 instance (Serialize c, CookiedWrapperClass b b' c)
-         => CookiedWrapperClass (c -> b) (ExtendedPayloadWrapper c -> b') c where
+         => CookiedWrapperClass (c -> b) ((ExtendedPayloadWrapper c) -> b') c where
   wrapCookied env _ f = \ExtendedPayloadWrapper {..} -> let
-    mc = if epwRenew then (Just epwSession) else Nothing
+    mc = if epwRenew
+         then (Just PayloadWrapper {
+                    pwSession = epwSession
+                  , pwExpiration = epwExpiration})
+         else Nothing
     in wrapCookied env mc (f epwSession)
 
+-- Otherwise: accept argument as is.
 instance (Serialize c, CookiedWrapperClass b b' c)
          => CookiedWrapperClass (a -> b) (a -> b') c where
   wrapCookied env ms f = wrapCookied env ms . f
