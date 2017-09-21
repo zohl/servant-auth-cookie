@@ -33,6 +33,9 @@ module Servant.Server.Experimental.Auth.Cookie
   , AuthCookieData
   , AuthCookieException (..)
 
+  , AuthCookieExceptionHandler
+  , AuthCookieHandler
+
   , PayloadWrapper(..)
   , ExtendedPayloadWrapper(..)
 #if MIN_VERSION_servant(0,9,1)
@@ -733,11 +736,18 @@ instance (Serialize c, CookiedWrapperClass b b' c)
 ----------------------------------------------------------------------------
 -- Default auth handler
 
+-- | Type for exception handler.
+type AuthCookieExceptionHandler = forall a. AuthCookieException -> Handler (Maybe (ExtendedPayloadWrapper a))
+
+-- | Type for cookied handler.
+type AuthCookieHandler a
+  = forall k. (ServerKeySet k)
+  => AuthCookieSettings                              -- ^ Options, see 'AuthCookieSettings'
+  -> k                                               -- ^ Instance of 'ServerKeySet' to use
+  -> AuthHandler Request (ExtendedPayloadWrapper a)  -- ^ The result
+
 -- | Cookie authentication handler.
-defaultAuthHandler :: (Serialize a, ServerKeySet k)
-  => AuthCookieSettings                             -- ^ Options, see 'AuthCookieSettings'
-  -> k                                              -- ^ Instance of 'ServerKeySet' to use
-  -> AuthHandler Request (ExtendedPayloadWrapper a) -- ^ The result
+defaultAuthHandler :: (Serialize a) => AuthCookieHandler a
 defaultAuthHandler acs sk = mkAuthHandler $ \request -> do
   msession <- liftIO (getSession acs sk request)
   maybe (throwError err403) return msession
