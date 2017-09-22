@@ -30,13 +30,13 @@ import Data.List (find)
 import Data.Serialize (Serialize)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
-import Network.Wai (Application, Request)
+import Network.Wai (Application)
 import Servant (ReqBody, FormUrlEncoded, Header)
 import Servant ((:<|>)(..), (:>), errBody, err403, toQueryParam)
 import Servant (Post, AuthProtect, Get, Server, Proxy)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
-import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
+import Servant.Server.Experimental.Auth (mkAuthHandler)
 import Servant.Server.Experimental.Auth.Cookie
 import Text.Blaze.Html5 ((!), Markup)
 import qualified Data.Text as T
@@ -212,9 +212,9 @@ server settings _generateKey rs sks =
   serveWhoami Nothing = return $ whoamiPage Nothing
   serveWhoami (Just h) = do
     mwm <- getHeaderSession settings sks h `catch` handleEx
-    return $ whoamiPage $ wmData <$> mwm
+    return $ whoamiPage $ epwSession <$> mwm
     where
-      handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata Account))
+      handleEx :: AuthCookieExceptionHandler
       handleEx _ex = return Nothing
 #else
   servePrivate = return . servePrivate' . wmData
@@ -242,16 +242,13 @@ server settings _generateKey rs sks =
 #endif
 
 -- | Custom handler that bluntly reports any occurred errors.
-authHandler :: (ServerKeySet s)
-  => AuthCookieSettings
-  -> s
-  -> AuthHandler Request (WithMetadata Account)
+authHandler :: AuthCookieHandler Account
 authHandler acs sks = mkAuthHandler $ \request ->
   (getSession acs sks request) `catch` handleEx >>= maybe
     (throwError err403 {errBody = "No cookies"})
     (return)
   where
-    handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata Account))
+    handleEx :: AuthCookieExceptionHandler
     handleEx ex = throwError err403 {errBody = fromStrict . BSC8.pack $ show ex}
 
 -- | Authentication settings.
