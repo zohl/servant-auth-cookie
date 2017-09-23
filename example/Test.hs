@@ -136,12 +136,6 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
         >>= liftIO . forgeCookies ss authSettings newServerKeySet
       getPrivate cookieValue `shouldRespondWithException` (IncorrectMAC "")
 
-    it "rejects requests with malformed expiration time" $ do
-      let newAuthSettings = authSettings { acsExpirationFormat = "%0Y%m%d" }
-      cookieValue <- loginRequest
-        >>= liftIO . forgeCookies ss newAuthSettings ssServerKeySet
-      getPrivate cookieValue `shouldRespondWithException` (CannotParseExpirationTime "")
-
     it "rejects requests with expired cookies" $ do
       let newAuthSettings = authSettings { acsMaxAge = 0 }
       cookieValue <- loginRequest
@@ -251,7 +245,7 @@ getPrivate :: BS.ByteString -> WaiSession SResponse
 getPrivate cookieValue = request
   methodGet "/private" [(hCookie, cookieValue)] ""
 
-extractSession :: SpecState -> SResponse -> IO (WithMetadata Account)
+extractSession :: SpecState -> SResponse -> IO (ExtendedPayloadWrapper Account)
 extractSession SpecState {..} SResponse {..} = maybe
   (error "cookies aren't available")
   (decryptSession ssAuthSettings ssServerKeySet)
@@ -264,8 +258,7 @@ forgeCookies :: (ServerKeySet k)
   -> SResponse
   -> IO BS.ByteString
 forgeCookies ss newAuthSettings newServerKeySet r = extractSession ss r
-  >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . wmData
-
+  >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . epwSession
 
 #if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 extractKeys :: WaiSession [BS.ByteString]
