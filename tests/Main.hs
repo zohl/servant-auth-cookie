@@ -38,7 +38,6 @@ spec = do
   describe "RandomSource"        randomSourceSpec
   describe "PersistentServerKey" persistentServerKeySpec
   describe "RenewalKeySet"       renewalKeySetSpec
-  describe "Cookie"              cookieSpec
   describe "Session"             sessionSpec
 
 randomSourceSpec :: Spec
@@ -138,7 +137,7 @@ renewalKeySetSpec = spec' where
         (_, ks') <- getKeys sk
         (k:ks') `shouldBe` ks
 
-
+{-
 cookieSpec :: Spec
 cookieSpec = do
   context "when used with different encryption/decryption algorithms" $ do
@@ -282,6 +281,8 @@ encryptThenDecrypt _ settings x = do
   rs <- mkRandomSource drgNew 1000
   sk <- mkPersistentServerKey <$> generateRandomBytes 16
   encryptSession settings rs sk x >>= (fmap wmData . decryptSession settings sk)
+-}
+
 
 data Tree a = Leaf a | Node a [Tree a] deriving (Eq, Show, Generic)
 
@@ -297,4 +298,14 @@ arbitraryTree n = do
   oneof
     [ Leaf <$> arbitrary
     , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
+
+
+sessionSpec :: Spec
+sessionSpec = do
+  context "when used with different encryption/decryption algorithms" $ do
+    it "works in CBC mode" $ pending
+  context "when cookie is corrupted" $
+    it "throws IncorrectMAC" $ pending
+  context "when cookie has expired" $
+    it "throws CookieExpired" $ pending
 
