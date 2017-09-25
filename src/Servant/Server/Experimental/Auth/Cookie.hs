@@ -82,6 +82,7 @@ module Servant.Server.Experimental.Auth.Cookie
   , renderSession
   , parseSessionRequest
   , parseSessionResponse
+  , unProxy
   ) where
 
 import Blaze.ByteString.Builder (toByteString)
