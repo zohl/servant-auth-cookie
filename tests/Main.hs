@@ -4,13 +4,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE QuasiQuotes       #-}
 
 module Main (main) where
 
 import           Control.Concurrent                      (threadDelay)
 import           Control.Monad.IO.Class                  (MonadIO, liftIO)
-import           Crypto.Cipher.AES                       (AES128, AES192,
-                                                          AES256)
+import           Crypto.Cipher.AES                       (AES128, AES192, AES256)
 import           Crypto.Cipher.Types
 import           Crypto.Hash                             (HashAlgorithm, SHA256(..),SHA384(..), SHA512(..))
 import           Crypto.Random                           (drgNew)
@@ -26,7 +28,9 @@ import           Test.Hspec
 import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
-
+import Data.Typeable (Typeable, typeRep)
+import Utils (mkProxy, mkPropId, blockCipherModes)
+import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..))
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -286,92 +290,18 @@ encryptThenDecrypt _ settings x = do
 -}
 
 
+
 sessionSpec :: Spec
 sessionSpec = do
-  context "when session is encrypted and decrypted" $ do
-    mapM_ (propId (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) treesOfInt) blockCipherModes
-    mapM_ (propId (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) treesOfString) blockCipherModes
+  context "test" $ do
+    $(fmap (DoE . map NoBindS) $ mapM (\(h, c) -> mkPropId h c)
+      [(h, c) |
+          h <- [''SHA256, ''SHA384, ''SHA512]
+        , c <- [''AES128, ''AES192, ''AES256]
+        ]
+     )
 
   context "when cookie is corrupted" $
     it "throws IncorrectMAC" $ pending
   context "when cookie has expired" $
     it "throws CookieExpired" $ pending
-
-
-
-data Tree a = Leaf a | Node a [Tree a] deriving (Eq, Show, Generic)
-
-instance Serialize a => Serialize (Tree a)
-
-instance Arbitrary a => Arbitrary (Tree a) where
-  arbitrary = sized arbitraryTree
-
-arbitraryTree :: Arbitrary a => Int -> Gen (Tree a)
-arbitraryTree 0 = Leaf <$> arbitrary
-arbitraryTree n = do
-  l <- choose (0, n `quot` 2)
-  oneof
-    [ Leaf <$> arbitrary
-    , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
-
-treesOfInt :: Proxy (Tree Int)
-treesOfInt = Proxy
-
-treesOfString :: Proxy (Tree String)
-treesOfString = Proxy
-
-
-roundTrip :: (Serialize a) => AuthCookieSettings -> Proxy a -> a -> IO a
-roundTrip  settings _ x = do
-  rs <- mkRandomSource drgNew 1000
-  sk <- mkPersistentServerKey <$> generateRandomBytes 16
-  encryptSession settings rs sk x >>= (fmap epwSession . decryptSession settings sk)
-
-
-class (HashAlgorithm h) => NamedHashAlgorithm h where
-  hashName :: h -> String
-
-instance NamedHashAlgorithm SHA512 where
-  hashName _ = show SHA512
-
-instance NamedHashAlgorithm SHA384 where
-  hashName _ = show SHA384
-
-instance NamedHashAlgorithm SHA256 where
-  hashName _ = show SHA256
-
-
-data BlockCipherMode c = BlockCipherMode {
-    bcmName    :: String
-  , bcmEncrypt :: CipherAlgorithm c
-  , bcmDecrypt :: CipherAlgorithm c
-  }
-
-blockCipherModes :: (BlockCipher c) => [BlockCipherMode c]
-blockCipherModes = [
-    BlockCipherMode "CBC" cbcEncrypt cbcDecrypt
-  , BlockCipherMode "CFB" cfbEncrypt cfbDecrypt
-  , BlockCipherMode "CTR" ctrCombine ctrCombine
-  ]
-
-
-propId
-  :: (NamedHashAlgorithm h, BlockCipher c, Serialize a, Arbitrary a, Show a, Eq a)
-  => Proxy h
-  -> Proxy c
-  -> Proxy a
-  -> BlockCipherMode c
-  -> Spec
-propId acsHashAlgorithm' acsCipher' p BlockCipherMode {..}
-  = let settings = (def $) $ \(AuthCookieSettings{..}) -> AuthCookieSettings {
-          acsHashAlgorithm = acsHashAlgorithm'
-        , acsCipher = acsCipher'
-        , acsEncryptAlgorithm = bcmEncrypt
-        , acsDecryptAlgorithm = bcmDecrypt
-        , ..}
-        name = intercalate "_" [
-            hashName $ unProxy acsHashAlgorithm'
-          , cipherName $ unProxy acsCipher'
-          , bcmName ]
-
-    in prop name $ \x -> roundTrip settings p x `shouldReturn` x
