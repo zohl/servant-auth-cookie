@@ -56,13 +56,6 @@ arbitraryTree n = do
     [ Leaf <$> arbitrary
     , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
 
-treesOfInt :: Proxy (Tree Int)
-treesOfInt = Proxy
-
-treesOfString :: Proxy (Tree String)
-treesOfString = Proxy
-
-
 roundTrip :: (Serialize a) => AuthCookieSettings -> Proxy a -> a -> IO a
 roundTrip  settings _ x = do
   rs <- mkRandomSource drgNew 1000
@@ -98,7 +91,7 @@ blockCipherModes = [
 
 
 propId
-  :: (NamedHashAlgorithm h, BlockCipher c, Serialize a, Arbitrary a, Show a, Eq a)
+  :: (NamedHashAlgorithm h, BlockCipher c, Serialize a, Arbitrary a, Show a, Eq a, Typeable a)
   => Proxy h
   -> Proxy c
   -> Proxy a
@@ -114,8 +107,8 @@ propId acsHashAlgorithm' acsCipher' p BlockCipherMode {..}
         name = intercalate "_" [
             hashName $ unProxy acsHashAlgorithm'
           , cipherName $ unProxy acsCipher'
-          , bcmName ]
-
+          , bcmName
+          ] ++ (" (" ++ (show . typeRep $ p) ++ ")")
     in prop name $ \x -> roundTrip settings p x `shouldReturn` x
 
 
@@ -126,13 +119,13 @@ mkProxy t = [| Proxy :: Proxy $(return t) |]
 mkPropId
   :: Name -- ^ Hash name
   -> Name -- ^ Cipher name
-  -- -> Name -- ^ Session type name
+  -> Name -- ^ Session type name
   -- -> BlockCipherMode c
   -> Q Exp
-mkPropId h c = [|
+mkPropId h c a = [|
   propId
     $(mkProxy $ PromotedT h)
     $(mkProxy $ PromotedT c)
-    (Proxy :: Proxy (Tree Int))
+    $(mkProxy $ (PromotedT ''Tree) `AppT` (PromotedT a))
     (head blockCipherModes)
     |]

@@ -294,10 +294,11 @@ encryptThenDecrypt _ settings x = do
 sessionSpec :: Spec
 sessionSpec = do
   context "test" $ do
-    $(fmap (DoE . map NoBindS) $ mapM (\(h, c) -> mkPropId h c)
-      [(h, c) |
+    $(fmap (DoE . map NoBindS) $ mapM (\(h, c, a) -> mkPropId h c a)
+      [(h, c, a) |
           h <- [''SHA256, ''SHA384, ''SHA512]
         , c <- [''AES128, ''AES192, ''AES256]
+        , a <- [''Int, ''String]
         ]
      )
 
