@@ -29,7 +29,7 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Utils (mkProxy, mkPropId, blockCipherModes)
+import Utils (mkPropId, CBCMode, CFBMode, CTRMode)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..))
 
 #if !MIN_VERSION_base(4,8,0)
@@ -294,11 +294,12 @@ encryptThenDecrypt _ settings x = do
 sessionSpec :: Spec
 sessionSpec = do
   context "test" $ do
-    $(fmap (DoE . map NoBindS) $ mapM (\(h, c, a) -> mkPropId h c a)
-      [(h, c, a) |
+    $(fmap (DoE . map NoBindS) $ mapM (\(h, c, a, m) -> mkPropId h c a m)
+      [(h, c, a, m) |
           h <- [''SHA256, ''SHA384, ''SHA512]
         , c <- [''AES128, ''AES192, ''AES256]
         , a <- [''Int, ''String]
+        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
         ]
      )
 

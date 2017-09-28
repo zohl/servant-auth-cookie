@@ -12,7 +12,10 @@ module Utils (
   , mkPropId
   , propId
   , mkProxy
-  , blockCipherModes
+  -- , blockCipherModes
+  , CBCMode
+  , CFBMode
+  , CTRMode
   ) where
 
 import           Control.Concurrent                      (threadDelay)
@@ -76,38 +79,51 @@ instance NamedHashAlgorithm SHA256 where
   hashName _ = show SHA256
 
 
-data BlockCipherMode c = BlockCipherMode {
-    bcmName    :: String
-  , bcmEncrypt :: CipherAlgorithm c
-  , bcmDecrypt :: CipherAlgorithm c
-  }
+class BlockCipherMode m where
+  modeName    :: m -> String
+  modeEncrypt :: (BlockCipher c) => m -> CipherAlgorithm c
+  modeDecrypt :: (BlockCipher c) => m -> CipherAlgorithm c
 
-blockCipherModes :: (BlockCipher c) => [BlockCipherMode c]
-blockCipherModes = [
-    BlockCipherMode "CBC" cbcEncrypt cbcDecrypt
-  , BlockCipherMode "CFB" cfbEncrypt cfbDecrypt
-  , BlockCipherMode "CTR" ctrCombine ctrCombine
-  ]
+data CBCMode
+instance BlockCipherMode CBCMode where
+  modeName    _ = "CBC"
+  modeEncrypt _ = cbcEncrypt
+  modeDecrypt _ = cbcDecrypt
+
+data CFBMode
+instance BlockCipherMode CFBMode where
+  modeName    _ = "CFB"
+  modeEncrypt _ = cfbEncrypt
+  modeDecrypt _ = cfbDecrypt
+
+data CTRMode
+instance BlockCipherMode CTRMode where
+  modeName    _ = "CTR"
+  modeEncrypt _ = ctrCombine
+  modeDecrypt _ = ctrCombine
 
 
 propId
-  :: (NamedHashAlgorithm h, BlockCipher c, Serialize a, Arbitrary a, Show a, Eq a, Typeable a)
-  => Proxy h
-  -> Proxy c
-  -> Proxy a
-  -> BlockCipherMode c
-  -> Spec
-propId acsHashAlgorithm' acsCipher' p BlockCipherMode {..}
+  :: ( NamedHashAlgorithm h
+     , BlockCipher c
+     , Serialize a, Arbitrary a, Show a, Eq a, Typeable a
+     , BlockCipherMode m
+  ) => Proxy h
+    -> Proxy c
+    -> Proxy a
+    -> Proxy m
+    -> Spec
+propId acsHashAlgorithm' acsCipher' p m
   = let settings = (def $) $ \(AuthCookieSettings{..}) -> AuthCookieSettings {
           acsHashAlgorithm = acsHashAlgorithm'
         , acsCipher = acsCipher'
-        , acsEncryptAlgorithm = bcmEncrypt
-        , acsDecryptAlgorithm = bcmDecrypt
+        , acsEncryptAlgorithm = modeEncrypt (unProxy m)
+        , acsDecryptAlgorithm = modeDecrypt (unProxy m)
         , ..}
         name = intercalate "_" [
             hashName $ unProxy acsHashAlgorithm'
           , cipherName $ unProxy acsCipher'
-          , bcmName
+          , modeName (unProxy m)
           ] ++ (" (" ++ (show . typeRep $ p) ++ ")")
     in prop name $ \x -> roundTrip settings p x `shouldReturn` x
 
@@ -115,17 +131,16 @@ propId acsHashAlgorithm' acsCipher' p BlockCipherMode {..}
 mkProxy :: Type -> Q Exp
 mkProxy t = [| Proxy :: Proxy $(return t) |]
 
-
 mkPropId
   :: Name -- ^ Hash name
   -> Name -- ^ Cipher name
   -> Name -- ^ Session type name
-  -- -> BlockCipherMode c
+  -> Name -- ^ Block cipher mode
   -> Q Exp
-mkPropId h c a = [|
+mkPropId h c a m = [|
   propId
     $(mkProxy $ PromotedT h)
     $(mkProxy $ PromotedT c)
     $(mkProxy $ (PromotedT ''Tree) `AppT` (PromotedT a))
-    (head blockCipherModes)
+    $(mkProxy $ PromotedT m)
     |]
