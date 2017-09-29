@@ -8,14 +8,13 @@
 {-# LANGUAGE QuasiQuotes       #-}
 
 module Utils (
-    Tree
-  , mkPropId
-  , propId
-  , mkProxy
-  -- , blockCipherModes
-  , CBCMode
+    CBCMode
   , CFBMode
   , CTRMode
+
+  , propId
+  , mkPropId
+  , groupProps
   ) where
 
 import           Control.Concurrent                      (threadDelay)
@@ -37,7 +36,7 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
+import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..))
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -144,3 +143,7 @@ mkPropId h c a m = [|
     $(mkProxy $ (PromotedT ''Tree) `AppT` (PromotedT a))
     $(mkProxy $ PromotedT m)
     |]
+
+
+groupProps :: [Q Exp] -> Q Exp
+groupProps = fmap (DoE . map NoBindS) . sequence

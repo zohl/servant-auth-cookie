@@ -29,8 +29,8 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Utils (mkPropId, CBCMode, CFBMode, CTRMode)
-import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..))
+import Utils (mkPropId, CBCMode, CFBMode, CTRMode, groupProps)
+import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -146,27 +146,6 @@ renewalKeySetSpec = spec' where
 {-
 cookieSpec :: Spec
 cookieSpec = do
-  context "when used with different encryption/decryption algorithms" $ do
-    it "works in CBC mode" $
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cbcEncrypt cbcDecrypt 64
-    it "works in CFB mode" $
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) cfbEncrypt cfbDecrypt 64
-    it "works in CTR combine mode" $
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-  context "when used with different ciphers" $ do
-    it "works with AES256" $
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-    it "works with AES192" $
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES192) ctrCombine ctrCombine 100
-    it "works with AES128" $
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES128) ctrCombine ctrCombine 100
-  context "when used with different hash algorithms" $ do
-    it "works with SHA512" $
-      testCipher (Proxy :: Proxy SHA512) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-    it "works with SHA384" $
-      testCipher (Proxy :: Proxy SHA384) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
-    it "works with SHA256" $
-      testCipher (Proxy :: Proxy SHA256) (Proxy :: Proxy AES256) ctrCombine ctrCombine 100
   context "when cookie is corrupted" $
     it "throws" $
       let selectIncorrectMAC (IncorrectMAC _) = True
@@ -183,21 +162,6 @@ cookieSpec = do
         (mkCookie 0 100)
         id
         selectCookieExpired
-
-testCipher :: (HashAlgorithm h, BlockCipher c)
-  => Proxy h           -- ^ Hash algorithm
-  -> Proxy c           -- ^ Cipher
-  -> CipherAlgorithm c -- ^ Encryption algorithm
-  -> CipherAlgorithm c -- ^ Decryption algorithm
-  -> Int               -- ^ Payload size
-  -> Expectation
-testCipher h c encryptAlgorithm decryptAlgorithm size = do
-  cookie <- mkCookie 10 size
-  result <- cipherId h c encryptAlgorithm decryptAlgorithm cookie id
-  cookieIV             result `shouldBe` cookieIV             cookie
-  diffUTCTime (cookieExpirationTime cookie) (cookieExpirationTime result)
-    `shouldSatisfy` (< fromIntegral (1 :: Integer))
-  cookiePayload        result `shouldBe` cookiePayload        cookie
 
 testCustomCookie
   :: IO Cookie
@@ -245,63 +209,21 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
             , acsCipher           = c
             , .. }
   encryptCookie sts sk cookie >>= (fmap wmData . decryptCookie sts sk . fmap encryptionHook)
-
-sessionSpec :: Spec
-sessionSpec = do
-  let treesOfInt = Proxy :: Proxy Int
-      treesOfString = Proxy :: Proxy String
-
-  context "when session is encrypted and decrypted" $ do
-    it "is not distorted in any way (1)" $
-      property $ \session -> encryptThenDecrypt treesOfInt def session `shouldReturn` session
-    it "is not distored in any way (2)" $
-      property $ \session -> encryptThenDecrypt treesOfString def session `shouldReturn` session
-  context "when session is encrypted and decrypted (CBC mode)" $ do
-    let sts = case def of
-                AuthCookieSettings{..} -> AuthCookieSettings
-                                          { acsEncryptAlgorithm = cbcEncrypt
-                                          , acsDecryptAlgorithm = cbcDecrypt
-                                          , .. }
-    it "is not distorted in any way (1)" $
-      property $ \session -> encryptThenDecrypt treesOfInt sts session `shouldReturn` session
-    it "is not distored in any way (2)" $
-      property $ \session -> encryptThenDecrypt treesOfString sts session `shouldReturn` session
-  context "when session is encrypted and decrypted (CFB mode)" $ do
-    let sts =
-          case def of
-            AuthCookieSettings {..} -> AuthCookieSettings
-                                       { acsEncryptAlgorithm = cfbEncrypt
-                                       , acsDecryptAlgorithm = cfbDecrypt
-                                       , .. }
-    it "is not distorted in any way (1)" $
-      property $ \session -> encryptThenDecrypt treesOfInt sts session `shouldReturn` session
-    it "is not distored in any way (2)" $
-      property $ \session -> encryptThenDecrypt treesOfString sts session `shouldReturn` session
-
-encryptThenDecrypt :: Serialize a
-  => Proxy a
-  -> AuthCookieSettings
-  -> Tree a
-  -> IO (Tree a)
-encryptThenDecrypt _ settings x = do
-  rs <- mkRandomSource drgNew 1000
-  sk <- mkPersistentServerKey <$> generateRandomBytes 16
-  encryptSession settings rs sk x >>= (fmap wmData . decryptSession settings sk)
 -}
 
 
 
+
 sessionSpec :: Spec
 sessionSpec = do
-  context "test" $ do
-    $(fmap (DoE . map NoBindS) $ mapM (\(h, c, a, m) -> mkPropId h c a m)
+  context "when session is encrypted and decrypted"
+    $(groupProps $ map (\(h, c, a, m) -> mkPropId h c a m)
       [(h, c, a, m) |
           h <- [''SHA256, ''SHA384, ''SHA512]
         , c <- [''AES128, ''AES192, ''AES256]
         , a <- [''Int, ''String]
         , m <- [''CBCMode, ''CFBMode, ''CTRMode]
-        ]
-     )
+        ])
 
   context "when cookie is corrupted" $
     it "throws IncorrectMAC" $ pending
