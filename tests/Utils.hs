@@ -12,9 +12,9 @@ module Utils (
   , CFBMode
   , CTRMode
 
-  , propId
-  , mkPropId
-  , groupProps
+  , propRoundTrip
+  , genPropRoundTrip
+  , groupRoundTrip
   ) where
 
 import           Control.Concurrent                      (threadDelay)
@@ -36,7 +36,8 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..))
+import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..), newName, Pat(..))
+import Data.Tagged (Tagged)
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -58,11 +59,20 @@ arbitraryTree n = do
     [ Leaf <$> arbitrary
     , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
 
-roundTrip :: (Serialize a) => AuthCookieSettings -> Proxy a -> a -> IO a
-roundTrip  settings _ x = do
+
+type CookieModifier = Tagged SerializedEncryptedCookie ByteString -> IO (Tagged SerializedEncryptedCookie ByteString)
+
+roundTrip
+  :: (Serialize a)
+  => AuthCookieSettings
+  -> CookieModifier
+  -> Proxy a
+  -> a
+  -> IO a
+roundTrip settings modify _ x = do
   rs <- mkRandomSource drgNew 1000
   sk <- mkPersistentServerKey <$> generateRandomBytes 16
-  encryptSession settings rs sk x >>= (fmap epwSession . decryptSession settings sk)
+  encryptSession settings rs sk x >>= modify >>= (fmap epwSession . decryptSession settings sk)
 
 
 class (HashAlgorithm h) => NamedHashAlgorithm h where
@@ -102,48 +112,69 @@ instance BlockCipherMode CTRMode where
   modeDecrypt _ = ctrCombine
 
 
-propId
+mkSettings
+  :: ( NamedHashAlgorithm h
+     , BlockCipher c
+     , BlockCipherMode m
+  ) => Proxy h
+    -> Proxy c
+    -> Proxy m
+    -> AuthCookieSettings
+mkSettings h c m = (def $) $ \(AuthCookieSettings{..}) -> AuthCookieSettings {
+    acsHashAlgorithm    = h
+  , acsCipher           = c
+  , acsEncryptAlgorithm = modeEncrypt (unProxy m)
+  , acsDecryptAlgorithm = modeDecrypt (unProxy m)
+  , ..}
+
+mkTestName
   :: ( NamedHashAlgorithm h
      , BlockCipher c
      , Serialize a, Arbitrary a, Show a, Eq a, Typeable a
      , BlockCipherMode m
   ) => Proxy h
     -> Proxy c
-    -> Proxy a
     -> Proxy m
+    -> Proxy a
+    -> String
+mkTestName h c m a = intercalate "_" [
+    hashName   $ unProxy h
+  , cipherName $ unProxy c
+  , modeName   $ unProxy m
+  ] ++ (" (" ++ (show . typeRep $ a) ++ ")")
+
+propRoundTrip
+  :: ( NamedHashAlgorithm h
+     , BlockCipher c
+     , Serialize a, Arbitrary a, Show a, Eq a, Typeable a
+     , BlockCipherMode m
+  ) => Proxy h
+    -> Proxy c
+    -> Proxy m
+    -> Proxy a
+    -> CookieModifier
     -> Spec
-propId acsHashAlgorithm' acsCipher' p m
-  = let settings = (def $) $ \(AuthCookieSettings{..}) -> AuthCookieSettings {
-          acsHashAlgorithm = acsHashAlgorithm'
-        , acsCipher = acsCipher'
-        , acsEncryptAlgorithm = modeEncrypt (unProxy m)
-        , acsDecryptAlgorithm = modeDecrypt (unProxy m)
-        , ..}
-        name = intercalate "_" [
-            hashName $ unProxy acsHashAlgorithm'
-          , cipherName $ unProxy acsCipher'
-          , modeName (unProxy m)
-          ] ++ (" (" ++ (show . typeRep $ p) ++ ")")
-    in prop name $ \x -> roundTrip settings p x `shouldReturn` x
+propRoundTrip h c m a modify = prop (mkTestName h c m a) $
+  \x -> roundTrip (mkSettings h c m) modify a x `shouldReturn` x
 
 
 mkProxy :: Type -> Q Exp
 mkProxy t = [| Proxy :: Proxy $(return t) |]
 
-mkPropId
-  :: Name -- ^ Hash name
-  -> Name -- ^ Cipher name
-  -> Name -- ^ Session type name
-  -> Name -- ^ Block cipher mode
-  -> Q Exp
-mkPropId h c a m = [|
-  propId
+
+genPropRoundTrip
+  :: Name  -- ^ Hash name
+  -> Name  -- ^ Cipher name
+  -> Name  -- ^ Block cipher mode
+  -> Name  -- ^ Session type name
+  -> Q Exp -- ^ Function of type (CookieModifier -> Spec)
+genPropRoundTrip h c m a = [|
+  propRoundTrip
     $(mkProxy $ PromotedT h)
     $(mkProxy $ PromotedT c)
-    $(mkProxy $ (PromotedT ''Tree) `AppT` (PromotedT a))
     $(mkProxy $ PromotedT m)
+    $(mkProxy $ (PromotedT ''Tree) `AppT` (PromotedT a))
     |]
 
-
-groupProps :: [Q Exp] -> Q Exp
-groupProps = fmap (DoE . map NoBindS) . sequence
+groupRoundTrip :: [Q Exp] -> Q Exp
+groupRoundTrip qs = [| \modify -> mapM_ ($ modify) $(ListE <$> sequence qs) |]

@@ -79,6 +79,14 @@ module Servant.Server.Experimental.Auth.Cookie
   , defaultAuthHandler
 
   -- exposed for testing purpose
+  , Cookie(..)
+  , SerializedEncryptedCookie
+
+  , base64Encode
+  , base64Decode
+  , cerealEncode
+  , cerealDecode
+
   , renderSession
   , parseSessionRequest
   , parseSessionResponse
@@ -498,11 +506,12 @@ encryptSession AuthCookieSettings {..} rs sks pwSession = do
 --     * 'BadProperKey'
 --     * 'IncorrectMAC'
 --     * 'CookieExpired'
+--     * 'SessionDeserializationFailed'
 decryptSession :: (MonadIO m, MonadThrow m, ServerKeySet k, Serialize a)
-  => AuthCookieSettings                 -- ^ Options, see 'AuthCookieSettings'
-  -> k                                  -- ^ Instance of 'ServerKeySet' to use
+  => AuthCookieSettings                          -- ^ Options, see 'AuthCookieSettings'
+  -> k                                           -- ^ Instance of 'ServerKeySet' to use
   -> Tagged SerializedEncryptedCookie ByteString -- ^ The 'ByteString' to decrypt
-  -> m (ExtendedPayloadWrapper a)       -- ^ The decrypted 'Cookie'
+  -> m (ExtendedPayloadWrapper a)                -- ^ The decrypted 'Cookie'
 decryptSession AuthCookieSettings {..} sks s = do
   let fromRight = either (throwM . SessionDeserializationFailed . show) return
 

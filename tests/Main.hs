@@ -29,7 +29,7 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Utils (mkPropId, CBCMode, CFBMode, CTRMode, groupProps)
+import Utils (CBCMode, CFBMode, CTRMode, genPropRoundTrip, groupRoundTrip)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
 
 #if !MIN_VERSION_base(4,8,0)
@@ -216,16 +216,20 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
 
 sessionSpec :: Spec
 sessionSpec = do
-  context "when session is encrypted and decrypted"
-    $(groupProps $ map (\(h, c, a, m) -> mkPropId h c a m)
-      [(h, c, a, m) |
+  context "when session is encrypted and decrypted" $
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a)
+      [(h, c, m, a) |
           h <- [''SHA256, ''SHA384, ''SHA512]
         , c <- [''AES128, ''AES192, ''AES256]
-        , a <- [''Int, ''String]
         , m <- [''CBCMode, ''CFBMode, ''CTRMode]
-        ])
+        , a <- [''Int, ''String]
+        ]) (return . id)
 
-  context "when cookie is corrupted" $
+  context "when payload is corrupted" $ do
+    it "throws SessionDeserializationFailed" $ pending
+
+  context "when MAC is corrupted" $ do
     it "throws IncorrectMAC" $ pending
+
   context "when cookie has expired" $
     it "throws CookieExpired" $ pending
