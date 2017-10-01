@@ -285,16 +285,18 @@ data MACBytes
 base64Encode :: Tagged EncryptedCookie ByteString -> Tagged SerializedEncryptedCookie ByteString
 base64Encode = retag . fmap Base64.encode
 
-base64Decode
-  :: Tagged SerializedEncryptedCookie ByteString
-  -> Either String (Tagged EncryptedCookie ByteString)
-base64Decode = fmap Tagged . Base64.decode . unTagged
+base64Decode :: (MonadThrow m)
+  => Tagged SerializedEncryptedCookie ByteString
+  -> m (Tagged EncryptedCookie ByteString)
+base64Decode = either (throwM . SessionDeserializationFailed) return
+             . fmap Tagged . Base64.decode . unTagged
 
 cerealEncode :: (Serialize a) => a -> Tagged b ByteString
 cerealEncode = Tagged . Serialize.encode
 
-cerealDecode :: (Serialize a) => Tagged b ByteString -> Either String a
-cerealDecode = Serialize.decode . unTagged
+cerealDecode :: (Serialize a, MonadThrow m) => Tagged b ByteString -> m a
+cerealDecode = either (throwM . SessionDeserializationFailed) return
+             . Serialize.decode . unTagged
 
 ----------------------------------------------------------------------------
 -- Random source
@@ -513,9 +515,7 @@ decryptSession :: (MonadIO m, MonadThrow m, ServerKeySet k, Serialize a)
   -> Tagged SerializedEncryptedCookie ByteString -- ^ The 'ByteString' to decrypt
   -> m (ExtendedPayloadWrapper a)                -- ^ The decrypted 'Cookie'
 decryptSession AuthCookieSettings {..} sks s = do
-  let fromRight = either (throwM . SessionDeserializationFailed . show) return
-
-  Cookie {..} <- fromRight (base64Decode s) >>= fromRight . cerealDecode
+  Cookie {..} <- base64Decode s >>= cerealDecode
   let checkMAC sk = cookieMAC == mkMAC acsHashAlgorithm sk Cookie {..}
   (sk, epwRenew) <- getKeys sks >>= \(currentKey, rotatedKeys) -> maybe
       (throwM $ IncorrectMAC (unTagged cookieMAC))
@@ -526,7 +526,7 @@ decryptSession AuthCookieSettings {..} sks s = do
       $ ((currentKey, False):(map (,True) rotatedKeys))
   key <- mkCookieKey acsCipher acsHashAlgorithm sk cookieIV
   PayloadWrapper {..} <- applyCipherAlgorithm acsDecryptAlgorithm cookieIV key cookiePayload
-                     >>= fromRight . cerealDecode
+                     >>= cerealDecode
 
   (liftIO getCurrentTime) >>= \t -> when (t >= pwExpiration) $ throwM (CookieExpired pwExpiration t)
 
