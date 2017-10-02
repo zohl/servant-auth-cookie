@@ -29,8 +29,9 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Utils (CBCMode, CFBMode, CTRMode, genPropRoundTrip, groupRoundTrip)
+import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, checkEquals)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
+import qualified Data.ByteString.Char8                         as BSC8
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -212,23 +213,27 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
 -}
 
 
-
-
 sessionSpec :: Spec
 sessionSpec = do
-  context "when session is encrypted and decrypted" $
-    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a)
+  context "when session is encrypted and decrypted"
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyId 'checkEquals)
       [(h, c, m, a) |
           h <- [''SHA256, ''SHA384, ''SHA512]
         , c <- [''AES128, ''AES192, ''AES256]
         , m <- [''CBCMode, ''CFBMode, ''CTRMode]
         , a <- [''Int, ''String]
-        ]) (return . id)
+        ])
 
-  context "when payload is corrupted" $ do
+  context "when base64 encoding is erroneous" $
     it "throws SessionDeserializationFailed" $ pending
 
-  context "when MAC is corrupted" $ do
+  context "when cereal encoding is erroneous (cookie)" $
+    it "throws SessionDeserializationFailed" $ pending
+
+  context "when cereal encoding is erroneous (payload)" $
+    it "throws SessionDeserializationFailed" $ pending
+
+  context "when MAC is erroneous" $
     it "throws IncorrectMAC" $ pending
 
   context "when cookie has expired" $

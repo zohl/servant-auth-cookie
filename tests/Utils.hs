@@ -15,6 +15,10 @@ module Utils (
   , propRoundTrip
   , genPropRoundTrip
   , groupRoundTrip
+
+  , modifyId
+
+  , checkEquals
   ) where
 
 import           Control.Concurrent                      (threadDelay)
@@ -61,6 +65,16 @@ arbitraryTree n = do
 
 
 type CookieModifier = Tagged SerializedEncryptedCookie ByteString -> IO (Tagged SerializedEncryptedCookie ByteString)
+
+modifyId :: CookieModifier
+modifyId = return . id
+
+
+type SessionChecker a = (Show a, Eq a) => a -> a -> Expectation
+
+checkEquals :: SessionChecker a
+checkEquals = shouldBe
+
 
 roundTrip
   :: (Serialize a)
@@ -153,9 +167,11 @@ propRoundTrip
     -> Proxy m
     -> Proxy a
     -> CookieModifier
+    -> SessionChecker a
     -> Spec
-propRoundTrip h c m a modify = prop (mkTestName h c m a) $
-  \x -> roundTrip (mkSettings h c m) modify a x `shouldReturn` x
+propRoundTrip h c m a modify check = prop (mkTestName h c m a) $
+  \x -> (roundTrip (mkSettings h c m) modify a x) >>= check x
+
 
 
 mkProxy :: Type -> Q Exp
@@ -167,14 +183,18 @@ genPropRoundTrip
   -> Name  -- ^ Cipher name
   -> Name  -- ^ Block cipher mode
   -> Name  -- ^ Session type name
+  -> Name  -- ^ Modifier name
+  -> Name  -- ^ Checker name
   -> Q Exp -- ^ Function of type (CookieModifier -> Spec)
-genPropRoundTrip h c m a = [|
+genPropRoundTrip h c m a modify check = [|
   propRoundTrip
     $(mkProxy $ PromotedT h)
     $(mkProxy $ PromotedT c)
     $(mkProxy $ PromotedT m)
     $(mkProxy $ (PromotedT ''Tree) `AppT` (PromotedT a))
-    |]
+    $(return $ VarE modify)
+    $(return $ VarE check)
+  |]
 
 groupRoundTrip :: [Q Exp] -> Q Exp
-groupRoundTrip qs = [| \modify -> mapM_ ($ modify) $(ListE <$> sequence qs) |]
+groupRoundTrip qs = [| sequence_ $(ListE <$> sequence qs) |]
