@@ -29,9 +29,8 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, checkEquals)
+import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, modifyBase64, checkEquals, checkSessionDeserializationFailed)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
-import qualified Data.ByteString.Char8                         as BSC8
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -224,8 +223,8 @@ sessionSpec = do
         , a <- [''Int, ''String]
         ])
 
-  context "when base64 encoding is erroneous" $
-    it "throws SessionDeserializationFailed" $ pending
+  context "when base64 encoding is erroneous"
+    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyBase64 'checkSessionDeserializationFailed)
 
   context "when cereal encoding is erroneous (cookie)" $
     it "throws SessionDeserializationFailed" $ pending

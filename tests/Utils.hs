@@ -17,8 +17,11 @@ module Utils (
   , groupRoundTrip
 
   , modifyId
+  , modifyBase64
 
   , checkEquals
+  , checkException
+  , checkSessionDeserializationFailed
   ) where
 
 import           Control.Concurrent                      (threadDelay)
@@ -42,6 +45,7 @@ import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..), newName, Pat(..))
 import Data.Tagged (Tagged)
+import qualified Data.ByteString.Char8                         as BSC8
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -69,11 +73,23 @@ type CookieModifier = Tagged SerializedEncryptedCookie ByteString -> IO (Tagged 
 modifyId :: CookieModifier
 modifyId = return . id
 
+modifyBase64 :: CookieModifier
+modifyBase64 = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
 
-type SessionChecker a = (Show a, Eq a) => a -> a -> Expectation
+
+type SessionChecker a = (Show a, Eq a) => a -> IO a -> Expectation
 
 checkEquals :: SessionChecker a
-checkEquals = shouldBe
+checkEquals = flip shouldReturn
+
+checkException :: Selector AuthCookieException -> SessionChecker a
+checkException e = \_ -> flip shouldThrow e
+
+checkSessionDeserializationFailed :: SessionChecker a
+checkSessionDeserializationFailed = checkException sel where
+  sel :: AuthCookieException -> Bool
+  sel (SessionDeserializationFailed _) = True
+  sel _                                = False
 
 
 roundTrip
@@ -170,7 +186,7 @@ propRoundTrip
     -> SessionChecker a
     -> Spec
 propRoundTrip h c m a modify check = prop (mkTestName h c m a) $
-  \x -> (roundTrip (mkSettings h c m) modify a x) >>= check x
+  \x -> check x (roundTrip (mkSettings h c m) modify a x)
 
 
 
