@@ -18,6 +18,7 @@ module Utils (
 
   , modifyId
   , modifyBase64
+  , modifyCookie
 
   , checkEquals
   , checkException
@@ -44,8 +45,9 @@ import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..), newName, Pat(..))
-import Data.Tagged (Tagged)
+import Data.Tagged (Tagged(..), unTagged)
 import qualified Data.ByteString.Char8                         as BSC8
+import Data.Monoid ((<>))
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -75,6 +77,9 @@ modifyId = return . id
 
 modifyBase64 :: CookieModifier
 modifyBase64 = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
+
+modifyCookie :: CookieModifier
+modifyCookie = fmap (base64Encode . Tagged . (const BS.empty) . unTagged) . base64Decode
 
 
 type SessionChecker a = (Show a, Eq a) => a -> IO a -> Expectation

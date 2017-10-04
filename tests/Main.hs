@@ -29,7 +29,7 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, modifyBase64, checkEquals, checkSessionDeserializationFailed)
+import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, modifyBase64, modifyCookie, checkEquals, checkSessionDeserializationFailed)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
 
 #if !MIN_VERSION_base(4,8,0)
@@ -215,19 +215,21 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
 sessionSpec :: Spec
 sessionSpec = do
   context "when session is encrypted and decrypted"
-    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyId 'checkEquals)
-      [(h, c, m, a) |
-          h <- [''SHA256, ''SHA384, ''SHA512]
-        , c <- [''AES128, ''AES192, ''AES256]
-        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
-        , a <- [''Int, ''String]
-        ])
+    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyId 'checkEquals)
+
+    -- $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyId 'checkEquals)
+    --   [(h, c, m, a) |
+    --       h <- [''SHA256, ''SHA384, ''SHA512]
+    --     , c <- [''AES128, ''AES192, ''AES256]
+    --     , m <- [''CBCMode, ''CFBMode, ''CTRMode]
+    --     , a <- [''Int, ''String]
+    --     ])
 
   context "when base64 encoding is erroneous"
     $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyBase64 'checkSessionDeserializationFailed)
 
   context "when cereal encoding is erroneous (cookie)" $
-    it "throws SessionDeserializationFailed" $ pending
+    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyCookie 'checkSessionDeserializationFailed)
 
   context "when cereal encoding is erroneous (payload)" $
     it "throws SessionDeserializationFailed" $ pending
