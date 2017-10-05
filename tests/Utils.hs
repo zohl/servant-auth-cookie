@@ -19,6 +19,7 @@ module Utils (
   , modifyId
   , modifyBase64
   , modifyCookie
+  , modifyPayload
 
   , checkEquals
   , checkException
@@ -70,16 +71,37 @@ arbitraryTree n = do
     , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
 
 
-type CookieModifier = Tagged SerializedEncryptedCookie ByteString -> IO (Tagged SerializedEncryptedCookie ByteString)
+type CookieModifier
+  =  forall k. (ServerKeySet k)
+  => AuthCookieSettings
+  -> RandomSource
+  -> k
+  -> Tagged SerializedEncryptedCookie ByteString
+  -> IO (Tagged SerializedEncryptedCookie ByteString)
 
 modifyId :: CookieModifier
-modifyId = return . id
+modifyId _ _ _ = return . id
 
 modifyBase64 :: CookieModifier
-modifyBase64 = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
+modifyBase64 _ _ _ = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
 
 modifyCookie :: CookieModifier
-modifyCookie = fmap (base64Encode . Tagged . (const BS.empty) . unTagged) . base64Decode
+modifyCookie _ _ _ = fmap (base64Encode . Tagged . (const BS.empty) . unTagged) . base64Decode
+
+modifyPayload :: CookieModifier
+modifyPayload AuthCookieSettings {..} rs sks s = do
+  c  <- base64Decode s >>= cerealDecode
+  sk <- (Tagged . fst) <$> getKeys sks
+
+  cookiePayload' <- return $ Tagged BS.empty
+  cookiePadding' <- mkPadding rs acsCipher cookiePayload'
+  let c' = c {
+          cookiePayload = cookiePayload'
+        , cookiePadding = cookiePadding'
+        }
+  let cookieMAC'= mkMAC acsHashAlgorithm sk c'
+
+  return . base64Encode . cerealEncode $ c' { cookieMAC = cookieMAC' }
 
 
 type SessionChecker a = (Show a, Eq a) => a -> IO a -> Expectation
@@ -107,7 +129,7 @@ roundTrip
 roundTrip settings modify _ x = do
   rs <- mkRandomSource drgNew 1000
   sk <- mkPersistentServerKey <$> generateRandomBytes 16
-  encryptSession settings rs sk x >>= modify >>= (fmap epwSession . decryptSession settings sk)
+  encryptSession settings rs sk x >>= modify settings rs sk >>= (fmap epwSession . decryptSession settings sk)
 
 
 class (HashAlgorithm h) => NamedHashAlgorithm h where
