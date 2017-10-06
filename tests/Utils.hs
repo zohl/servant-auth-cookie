@@ -20,10 +20,12 @@ module Utils (
   , modifyBase64
   , modifyCookie
   , modifyPayload
+  , modifyMAC
 
   , checkEquals
   , checkException
   , checkSessionDeserializationFailed
+  , checkIncorrectMAC
   ) where
 
 import           Control.Concurrent                      (threadDelay)
@@ -103,6 +105,11 @@ modifyPayload AuthCookieSettings {..} rs sks s = do
 
   return . base64Encode . cerealEncode $ c' { cookieMAC = cookieMAC' }
 
+modifyMAC :: CookieModifier
+modifyMAC AuthCookieSettings {..} rs sks s = do
+  c  <- base64Decode s >>= cerealDecode
+  return . base64Encode . cerealEncode $ c { cookieMAC = Tagged BS.empty }
+
 
 type SessionChecker a = (Show a, Eq a) => a -> IO a -> Expectation
 
@@ -117,6 +124,12 @@ checkSessionDeserializationFailed = checkException sel where
   sel :: AuthCookieException -> Bool
   sel (SessionDeserializationFailed _) = True
   sel _                                = False
+
+checkIncorrectMAC :: SessionChecker a
+checkIncorrectMAC = checkException sel where
+  sel :: AuthCookieException -> Bool
+  sel (IncorrectMAC _) = True
+  sel _                = False
 
 
 roundTrip

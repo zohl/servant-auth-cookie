@@ -29,7 +29,7 @@ import           Test.QuickCheck
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, modifyBase64, modifyCookie, modifyPayload, checkEquals, checkSessionDeserializationFailed)
+import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, modifyBase64, modifyCookie, modifyPayload, modifyMAC, checkEquals, checkSessionDeserializationFailed, checkIncorrectMAC)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
 
 #if !MIN_VERSION_base(4,8,0)
@@ -235,7 +235,7 @@ sessionSpec = do
     $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyPayload 'checkSessionDeserializationFailed)
 
   context "when MAC is erroneous" $
-    it "throws IncorrectMAC" $ pending
+    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyMAC 'checkIncorrectMAC)
 
   context "when cookie has expired" $
     it "throws CookieExpired" $ pending
