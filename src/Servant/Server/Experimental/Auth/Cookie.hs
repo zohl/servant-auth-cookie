@@ -81,6 +81,12 @@ module Servant.Server.Experimental.Auth.Cookie
   -- exposed for testing purpose
   , Cookie(..)
   , SerializedEncryptedCookie
+  , EncryptedCookie
+
+  , IVBytes
+  , PayloadBytes
+  , PaddingBytes
+  , MACBytes
 
   , base64Encode
   , base64Decode

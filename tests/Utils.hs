@@ -73,29 +73,28 @@ arbitraryTree n = do
     , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
 
 
-type CookieModifier
+type Modifier a
   =  forall k. (ServerKeySet k)
   => AuthCookieSettings
   -> RandomSource
   -> k
-  -> Tagged SerializedEncryptedCookie ByteString
-  -> IO (Tagged SerializedEncryptedCookie ByteString)
+  -> a
+  -> IO a
 
-modifyId :: CookieModifier
-modifyId _ _ _ = return . id
+type EncryptedCookieModifier = Modifier (Tagged SerializedEncryptedCookie ByteString)
 
-modifyBase64 :: CookieModifier
-modifyBase64 _ _ _ = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
 
-modifyCookie :: CookieModifier
-modifyCookie _ _ _ = fmap (base64Encode . Tagged . (const BS.empty) . unTagged) . base64Decode
+insideBase64 :: Modifier (Tagged EncryptedCookie ByteString) -> EncryptedCookieModifier
+insideBase64 f = \acs rs sks x -> base64Decode x >>= fmap base64Encode . f acs rs sks
 
-modifyPayload :: CookieModifier
-modifyPayload AuthCookieSettings {..} rs sks s = do
-  c  <- base64Decode s >>= cerealDecode
+insideCookie :: Modifier Cookie -> EncryptedCookieModifier
+insideCookie f = insideBase64 $ \acs rs sks x -> cerealDecode x >>= fmap cerealEncode . f acs rs sks
+
+insidePayload :: Modifier (Tagged PayloadBytes ByteString) -> EncryptedCookieModifier
+insidePayload f = insideCookie $ \(acs@AuthCookieSettings{..}) rs sks c -> do
   sk <- (Tagged . fst) <$> getKeys sks
 
-  cookiePayload' <- return $ Tagged BS.empty
+  cookiePayload' <- f acs rs sks (cookiePayload c)
   cookiePadding' <- mkPadding rs acsCipher cookiePayload'
   let c' = c {
           cookiePayload = cookiePayload'
@@ -103,12 +102,26 @@ modifyPayload AuthCookieSettings {..} rs sks s = do
         }
   let cookieMAC'= mkMAC acsHashAlgorithm sk c'
 
-  return . base64Encode . cerealEncode $ c' { cookieMAC = cookieMAC' }
+  return c' { cookieMAC = cookieMAC' }
 
-modifyMAC :: CookieModifier
-modifyMAC AuthCookieSettings {..} rs sks s = do
-  c  <- base64Decode s >>= cerealDecode
-  return . base64Encode . cerealEncode $ c { cookieMAC = Tagged BS.empty }
+nullify :: Tagged a ByteString -> IO (Tagged a ByteString)
+nullify = return . Tagged . const BS.empty . unTagged
+
+
+modifyId :: EncryptedCookieModifier
+modifyId _ _ _ = return . id
+
+modifyBase64 :: EncryptedCookieModifier
+modifyBase64 _ _ _ = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
+
+modifyCookie :: EncryptedCookieModifier
+modifyCookie = insideBase64 $ \_ _ _ -> nullify
+
+modifyPayload :: EncryptedCookieModifier
+modifyPayload = insidePayload $ \_ _ _ -> nullify
+
+modifyMAC :: EncryptedCookieModifier
+modifyMAC = insideCookie $ \_ _ _ c -> return c { cookieMAC = Tagged BS.empty }
 
 
 type SessionChecker a = (Show a, Eq a) => a -> IO a -> Expectation
@@ -135,7 +148,7 @@ checkIncorrectMAC = checkException sel where
 roundTrip
   :: (Serialize a)
   => AuthCookieSettings
-  -> CookieModifier
+  -> EncryptedCookieModifier
   -> Proxy a
   -> a
   -> IO a
@@ -222,7 +235,7 @@ propRoundTrip
     -> Proxy c
     -> Proxy m
     -> Proxy a
-    -> CookieModifier
+    -> EncryptedCookieModifier
     -> SessionChecker a
     -> Spec
 propRoundTrip h c m a modify check = prop (mkTestName h c m a) $
@@ -241,7 +254,7 @@ genPropRoundTrip
   -> Name  -- ^ Session type name
   -> Name  -- ^ Modifier name
   -> Name  -- ^ Checker name
-  -> Q Exp -- ^ Function of type (CookieModifier -> Spec)
+  -> Q Exp -- ^ Function of type (EncryptedCookieModifier -> Spec)
 genPropRoundTrip h c m a modify check = [|
   propRoundTrip
     $(mkProxy $ PromotedT h)
