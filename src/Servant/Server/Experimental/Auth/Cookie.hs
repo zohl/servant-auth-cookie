@@ -98,8 +98,10 @@ module Servant.Server.Experimental.Auth.Cookie
   , parseSessionResponse
   , unProxy
 
+  , mkCookieKey
   , mkPadding
   , mkMAC
+  , applyCipherAlgorithm
   ) where
 
 import Blaze.ByteString.Builder (toByteString)

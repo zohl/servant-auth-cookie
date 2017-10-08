@@ -21,11 +21,13 @@ module Utils (
   , modifyCookie
   , modifyPayload
   , modifyMAC
+  , modifyExpiration
 
   , checkEquals
   , checkException
   , checkSessionDeserializationFailed
   , checkIncorrectMAC
+  , checkCookieExpired
   ) where
 
 import           Control.Concurrent                      (threadDelay)
@@ -51,6 +53,7 @@ import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..), n
 import Data.Tagged (Tagged(..), unTagged)
 import qualified Data.ByteString.Char8                         as BSC8
 import Data.Monoid ((<>))
+import Control.Monad.Catch (MonadThrow (..))
 
 #if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative
@@ -72,56 +75,77 @@ arbitraryTree n = do
     [ Leaf <$> arbitrary
     , Node <$> arbitrary <*> vectorOf l (arbitraryTree (n `quot` 2))]
 
+type Updater a = a -> IO a
 
-type Modifier a
+type Modifier c a
   =  forall k. (ServerKeySet k)
   => AuthCookieSettings
   -> RandomSource
   -> k
-  -> a
-  -> IO a
+  -> Proxy a
+  -> Updater c
 
-type EncryptedCookieModifier = Modifier (Tagged SerializedEncryptedCookie ByteString)
+type EncryptedCookieModifier a = Modifier (Tagged SerializedEncryptedCookie ByteString) a
 
 
-insideBase64 :: Modifier (Tagged EncryptedCookie ByteString) -> EncryptedCookieModifier
-insideBase64 f = \acs rs sks x -> base64Decode x >>= fmap base64Encode . f acs rs sks
+insideBase64 :: Modifier (Tagged EncryptedCookie ByteString) a -> EncryptedCookieModifier a
+insideBase64 f = \acs rs sks p x -> base64Decode x >>= fmap base64Encode . f acs rs sks p
 
-insideCookie :: Modifier Cookie -> EncryptedCookieModifier
-insideCookie f = insideBase64 $ \acs rs sks x -> cerealDecode x >>= fmap cerealEncode . f acs rs sks
+insideSerializedCookie :: Modifier Cookie a -> EncryptedCookieModifier a
+insideSerializedCookie f = insideBase64 $ \acs rs sks p x -> cerealDecode x >>= fmap cerealEncode . f acs rs sks p
 
-insidePayload :: Modifier (Tagged PayloadBytes ByteString) -> EncryptedCookieModifier
-insidePayload f = insideCookie $ \(acs@AuthCookieSettings{..}) rs sks c -> do
+insideConsistentCookie :: Modifier Cookie a -> EncryptedCookieModifier a
+insideConsistentCookie f = insideSerializedCookie $ \(acs@AuthCookieSettings {..}) rs sks p c -> do
   sk <- (Tagged . fst) <$> getKeys sks
-
-  cookiePayload' <- f acs rs sks (cookiePayload c)
+  cookiePayload' <- cookiePayload <$> f acs rs sks p c
   cookiePadding' <- mkPadding rs acsCipher cookiePayload'
   let c' = c {
           cookiePayload = cookiePayload'
         , cookiePadding = cookiePadding'
         }
-  let cookieMAC'= mkMAC acsHashAlgorithm sk c'
+  return c' { cookieMAC = mkMAC acsHashAlgorithm sk c' }
 
-  return c' { cookieMAC = cookieMAC' }
+insideEncryptedCookie :: Modifier (Tagged PayloadBytes ByteString) a -> EncryptedCookieModifier a
+insideEncryptedCookie f = insideConsistentCookie $ \(acs@AuthCookieSettings {..}) rs sks p (c@Cookie {..}) -> do
+  sk <- (Tagged . fst) <$> getKeys sks
+  key <- mkCookieKey acsCipher acsHashAlgorithm sk cookieIV
+  cookiePayload' <- applyCipherAlgorithm acsDecryptAlgorithm cookieIV key cookiePayload
+                >>= f acs rs sks p
+                >>= applyCipherAlgorithm acsEncryptAlgorithm cookieIV key
+  return c { cookiePayload = cookiePayload' }
 
 nullify :: Tagged a ByteString -> IO (Tagged a ByteString)
 nullify = return . Tagged . const BS.empty . unTagged
 
+updatePayload :: (Tagged PayloadBytes ByteString -> IO (Tagged PayloadBytes ByteString)) -> Cookie -> IO Cookie
+updatePayload f c = (f $ cookiePayload c) >>= \cookiePayload' -> return c { cookiePayload = cookiePayload' }
 
-modifyId :: EncryptedCookieModifier
-modifyId _ _ _ = return . id
+cerealDecode' :: (Serialize a, MonadThrow m) => Proxy a -> Tagged b ByteString -> m (PayloadWrapper a)
+cerealDecode' _ = cerealDecode
 
-modifyBase64 :: EncryptedCookieModifier
-modifyBase64 _ _ _ = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
+cerealEncode' :: (Serialize a) => Proxy a -> PayloadWrapper a -> Tagged b ByteString
+cerealEncode' _ = cerealEncode
 
-modifyCookie :: EncryptedCookieModifier
-modifyCookie = insideBase64 $ \_ _ _ -> nullify
 
-modifyPayload :: EncryptedCookieModifier
-modifyPayload = insidePayload $ \_ _ _ -> nullify
+modifyId :: EncryptedCookieModifier a
+modifyId _ _ _ _ = return . id
 
-modifyMAC :: EncryptedCookieModifier
-modifyMAC = insideCookie $ \_ _ _ c -> return c { cookieMAC = Tagged BS.empty }
+modifyBase64 :: EncryptedCookieModifier a
+modifyBase64 _ _ _ _ = return . fmap (BSC8.scanl1 (\c c' -> if c == '_' then c' else '_'))
+
+modifyCookie :: EncryptedCookieModifier a
+modifyCookie = insideBase64 $ \_ _ _ _ -> nullify
+
+modifyPayload :: EncryptedCookieModifier a
+modifyPayload = insideConsistentCookie $ \_ _ _ _ -> updatePayload nullify
+
+modifyMAC :: EncryptedCookieModifier a
+modifyMAC = insideSerializedCookie $ \_ _ _ _ -> updatePayload nullify
+
+modifyExpiration :: (Serialize a) => EncryptedCookieModifier a
+modifyExpiration = insideEncryptedCookie $ \AuthCookieSettings {..} _ _ p s -> do
+  r <- cerealDecode' p s
+  return $ cerealEncode' p r { pwExpiration = addUTCTime (-acsMaxAge * 2) (pwExpiration r) }
 
 
 type SessionChecker a = (Show a, Eq a) => a -> IO a -> Expectation
@@ -144,18 +168,24 @@ checkIncorrectMAC = checkException sel where
   sel (IncorrectMAC _) = True
   sel _                = False
 
+checkCookieExpired :: SessionChecker a
+checkCookieExpired = checkException sel where
+  sel :: AuthCookieException -> Bool
+  sel (CookieExpired _ _) = True
+  sel _                   = False
+
 
 roundTrip
   :: (Serialize a)
   => AuthCookieSettings
-  -> EncryptedCookieModifier
+  -> EncryptedCookieModifier a
   -> Proxy a
   -> a
   -> IO a
-roundTrip settings modify _ x = do
+roundTrip settings modify p x = do
   rs <- mkRandomSource drgNew 1000
   sk <- mkPersistentServerKey <$> generateRandomBytes 16
-  encryptSession settings rs sk x >>= modify settings rs sk >>= (fmap epwSession . decryptSession settings sk)
+  encryptSession settings rs sk x >>= modify settings rs sk p >>= (fmap epwSession . decryptSession settings sk)
 
 
 class (HashAlgorithm h) => NamedHashAlgorithm h where
@@ -235,7 +265,7 @@ propRoundTrip
     -> Proxy c
     -> Proxy m
     -> Proxy a
-    -> EncryptedCookieModifier
+    -> EncryptedCookieModifier a
     -> SessionChecker a
     -> Spec
 propRoundTrip h c m a modify check = prop (mkTestName h c m a) $
