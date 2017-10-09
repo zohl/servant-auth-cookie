@@ -27,7 +27,7 @@ import           Servant.Server.Experimental.Auth.Cookie
 import           Test.Hspec
 import           Test.QuickCheck
 import Data.List (intercalate)
-import Test.Hspec.QuickCheck (prop)
+import Test.Hspec.QuickCheck (prop, modifyMaxSuccess)
 import Data.Typeable (Typeable, typeRep)
 import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, modifyBase64, modifyCookie, modifyPayload, modifyMAC, modifyExpiration, checkEquals, checkSessionDeserializationFailed, checkIncorrectMAC, checkCookieExpired)
 import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
@@ -213,29 +213,57 @@ cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
 
 
 sessionSpec :: Spec
-sessionSpec = do
+sessionSpec = modifyMaxSuccess (const 10) $ do
   context "when session is encrypted and decrypted"
-    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyId 'checkEquals)
-
-    -- $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyId 'checkEquals)
-    --   [(h, c, m, a) |
-    --       h <- [''SHA256, ''SHA384, ''SHA512]
-    --     , c <- [''AES128, ''AES192, ''AES256]
-    --     , m <- [''CBCMode, ''CFBMode, ''CTRMode]
-    --     , a <- [''Int, ''String]
-    --     ])
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyId 'checkEquals)
+      [(h, c, m, a) |
+          h <- [''SHA256, ''SHA384, ''SHA512]
+        , c <- [''AES128, ''AES192, ''AES256]
+        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
+        , a <- [''Int, ''String]
+        ])
 
   context "when base64 encoding is erroneous"
-    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyBase64 'checkSessionDeserializationFailed)
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyBase64 'checkSessionDeserializationFailed)
+      [(h, c, m, a) |
+          h <- [''SHA256, ''SHA384, ''SHA512]
+        , c <- [''AES128, ''AES192, ''AES256]
+        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
+        , a <- [''Int, ''String]
+        ])
 
   context "when cereal encoding is erroneous (cookie)" $
-    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyCookie 'checkSessionDeserializationFailed)
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyCookie 'checkSessionDeserializationFailed)
+      [(h, c, m, a) |
+          h <- [''SHA256, ''SHA384, ''SHA512]
+        , c <- [''AES128, ''AES192, ''AES256]
+        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
+        , a <- [''Int, ''String]
+        ])
 
   context "when cereal encoding is erroneous (payload)" $
-    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyPayload 'checkSessionDeserializationFailed)
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyPayload 'checkSessionDeserializationFailed)
+      [(h, c, m, a) |
+          h <- [''SHA256, ''SHA384, ''SHA512]
+        , c <- [''AES128, ''AES192, ''AES256]
+        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
+        , a <- [''Int, ''String]
+        ])
 
   context "when MAC is erroneous" $
-    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyMAC 'checkIncorrectMAC)
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyMAC 'checkIncorrectMAC)
+      [(h, c, m, a) |
+          h <- [''SHA256, ''SHA384, ''SHA512]
+        , c <- [''AES128, ''AES192, ''AES256]
+        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
+        , a <- [''Int, ''String]
+        ])
 
   context "when cookie has expired" $
-    $(genPropRoundTrip ''SHA256 ''AES128 ''CBCMode ''Int 'modifyExpiration 'checkCookieExpired)
+    $(groupRoundTrip $ map (\(h, c, m, a) -> genPropRoundTrip h c m a 'modifyExpiration 'checkCookieExpired)
+      [(h, c, m, a) |
+          h <- [''SHA256, ''SHA384, ''SHA512]
+        , c <- [''AES128, ''AES192, ''AES256]
+        , m <- [''CBCMode, ''CFBMode, ''CTRMode]
+        , a <- [''Int, ''String]
+        ])
