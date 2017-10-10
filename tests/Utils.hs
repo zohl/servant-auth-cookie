@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP               #-}
 {-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -30,33 +29,29 @@ module Utils (
   , checkCookieExpired
   ) where
 
-import           Control.Concurrent                      (threadDelay)
-import           Control.Monad.IO.Class                  (MonadIO, liftIO)
-import           Crypto.Cipher.AES                       (AES128, AES192, AES256)
-import           Crypto.Cipher.Types
-import           Crypto.Hash                             (HashAlgorithm, SHA256(..),SHA384(..), SHA512(..))
-import           Crypto.Random                           (drgNew)
-import           Data.ByteString                         (ByteString)
-import qualified Data.ByteString                         as BS
-import           Data.Default
-import           Data.Proxy
-import           Data.Serialize                          (Serialize)
-import           Data.Time
-import           GHC.Generics                            (Generic)
-import           Servant.Server.Experimental.Auth.Cookie
-import           Test.Hspec
-import           Test.QuickCheck
+import Crypto.Cipher.Types (BlockCipher(..), Cipher(..))
+import Crypto.Hash (HashAlgorithm, SHA256(..), SHA384(..), SHA512(..))
+import Crypto.Random (drgNew)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import Data.Default (def)
+import Data.Proxy (Proxy(..))
+import Data.Serialize (Serialize)
+import Data.Time (addUTCTime)
+import GHC.Generics (Generic)
+import Servant.Server.Experimental.Auth.Cookie
+import Test.Hspec (Spec, Selector, Expectation, shouldThrow, shouldReturn)
+import Test.QuickCheck (Arbitrary(..), Gen, vectorOf, oneof, choose, sized)
 import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
 import Data.Typeable (Typeable, typeRep)
-import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ, Stmt(..), newName, Pat(..))
+import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q)
 import Data.Tagged (Tagged(..), unTagged)
-import qualified Data.ByteString.Char8                         as BSC8
-import Data.Monoid ((<>))
+import qualified Data.ByteString.Char8 as BSC8
 import Control.Monad.Catch (MonadThrow (..))
 
 #if !MIN_VERSION_base(4,8,0)
-import           Control.Applicative
+import Control.Applicative ()
 #endif
 
 
@@ -272,10 +267,8 @@ propRoundTrip h c m a modify check = prop (mkTestName h c m a) $
   \x -> check x (roundTrip (mkSettings h c m) modify a x)
 
 
-
 mkProxy :: Type -> Q Exp
 mkProxy t = [| Proxy :: Proxy $(return t) |]
-
 
 genPropRoundTrip
   :: Name  -- ^ Hash name

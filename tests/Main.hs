@@ -1,40 +1,30 @@
 {-# LANGUAGE CPP               #-}
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE RecordWildCards   #-}
-{-# LANGUAGE TypeOperators     #-}
 {-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE QuasiQuotes       #-}
 
 module Main (main) where
 
-import           Control.Concurrent                      (threadDelay)
-import           Control.Monad.IO.Class                  (MonadIO, liftIO)
-import           Crypto.Cipher.AES                       (AES128, AES192, AES256)
-import           Crypto.Cipher.Types
-import           Crypto.Hash                             (HashAlgorithm, SHA256(..),SHA384(..), SHA512(..))
-import           Crypto.Random                           (drgNew)
-import           Data.ByteString                         (ByteString)
-import qualified Data.ByteString                         as BS
-import           Data.Default
-import           Data.Proxy
-import           Data.Serialize                          (Serialize)
-import           Data.Time
-import           GHC.Generics                            (Generic)
-import           Servant.Server.Experimental.Auth.Cookie
-import           Test.Hspec
-import           Test.QuickCheck
-import Data.List (intercalate)
-import Test.Hspec.QuickCheck (prop, modifyMaxSuccess)
-import Data.Typeable (Typeable, typeRep)
-import Utils (CBCMode, CFBMode, CTRMode, propRoundTrip, genPropRoundTrip, groupRoundTrip, modifyId, modifyBase64, modifyCookie, modifyPayload, modifyMAC, modifyExpiration, checkEquals, checkSessionDeserializationFailed, checkIncorrectMAC, checkCookieExpired)
-import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q, runQ)
+import Control.Concurrent (threadDelay)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Crypto.Cipher.AES (AES128, AES192, AES256)
+import Crypto.Cipher.Types ()
+import Crypto.Hash (SHA256(..),SHA384(..), SHA512(..))
+import Crypto.Random (drgNew)
+import qualified Data.ByteString as BS
+import Data.Default ()
+import Data.Proxy ()
+import Data.Time (UTCTime(..), NominalDiffTime, addUTCTime, getCurrentTime)
+import Servant.Server.Experimental.Auth.Cookie
+import Test.Hspec (Spec, context, shouldBe, shouldNotBe, it, describe, hspec)
+import Test.QuickCheck ()
+import Test.Hspec.QuickCheck (modifyMaxSuccess)
+import Utils
 
 #if !MIN_VERSION_base(4,8,0)
-import           Control.Applicative
+import Control.Applicative ()
 #endif
+
 
 main :: IO ()
 main = hspec spec
@@ -86,7 +76,6 @@ persistentServerKeySpec = do
 
 renewalKeySetSpec :: Spec
 renewalKeySetSpec = spec' where
-
   keySize :: Int
   keySize = 16
 
@@ -142,74 +131,6 @@ renewalKeySetSpec = spec' where
         removeKey sk k
         (_, ks') <- getKeys sk
         (k:ks') `shouldBe` ks
-
-{-
-cookieSpec :: Spec
-cookieSpec = do
-  context "when cookie is corrupted" $
-    it "throws" $
-      let selectIncorrectMAC (IncorrectMAC _) = True
-          selectIncorrectMAC _                = False
-      in testCustomCookie
-        (mkCookie 10 100)
-        (BS.drop 1)
-        selectIncorrectMAC
-  context "when cookie has expired" $
-    it "throws CookieExpired" $
-      let selectCookieExpired (CookieExpired _ _) = True
-          selectCookieExpired _                   = False
-      in testCustomCookie
-        (mkCookie 0 100)
-        id
-        selectCookieExpired
-
-testCustomCookie
-  :: IO Cookie
-  -> (ByteString -> ByteString)
-  -> Selector AuthCookieException
-  -> Expectation
-testCustomCookie mkCookie' encryptionHook selector = do
-  cookie <- mkCookie'
-  cipherId
-    (Proxy :: Proxy SHA256)
-    (Proxy :: Proxy AES256)
-    ctrCombine ctrCombine
-    cookie
-    encryptionHook
-    `shouldThrow` selector
-
-mkCookie :: Int -> Int -> IO Cookie
-mkCookie dt size = do
-  rs         <- mkRandomSource drgNew 1000
-  iv         <- getRandomBytes rs 16
-  expiration <- addUTCTime (fromIntegral dt) <$> getCurrentTime
-  payload    <- getRandomBytes rs size
-  return Cookie
-    { cookieIV             = iv
-    , cookieExpirationTime = expiration
-    , cookiePayload        = payload }
-
-cipherId :: (HashAlgorithm h, BlockCipher c)
-  => Proxy h           -- ^ Hash algorithm
-  -> Proxy c           -- ^ Cipher
-  -> CipherAlgorithm c -- ^ Encryption algorithm
-  -> CipherAlgorithm c -- ^ Decryption algorithm
-  -> Cookie            -- ^ 'Cookie' to encrypt
-  -> (BS.ByteString -> BS.ByteString) -- ^ Encryption hook
-  -> IO Cookie         -- ^ Restored 'Cookie'
-cipherId h c encryptAlgorithm decryptAlgorithm cookie encryptionHook = do
-  sk <- mkPersistentServerKey <$> generateRandomBytes 16
-
-  let sts =
-        case def of
-          AuthCookieSettings {..} -> AuthCookieSettings
-            { acsEncryptAlgorithm = encryptAlgorithm
-            , acsDecryptAlgorithm = decryptAlgorithm
-            , acsHashAlgorithm    = h
-            , acsCipher           = c
-            , .. }
-  encryptCookie sts sk cookie >>= (fmap wmData . decryptCookie sts sk . fmap encryptionHook)
--}
 
 
 sessionSpec :: Spec
