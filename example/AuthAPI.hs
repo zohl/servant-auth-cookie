@@ -53,7 +53,7 @@ import Servant (Headers)
 #endif
 
 #if MIN_VERSION_servant (0,9,0)
-import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique)
+import Web.FormUrlEncoded (FromForm(..), ToForm(..), lookupUnique, lookupMaybe)
 #else
 import Servant (FromFormUrlEncoded(..), ToFormUrlEncoded(..))
 #endif
@@ -103,39 +103,42 @@ userLookup username password db = accUid <$> find f db
 data LoginForm = LoginForm
   { lfUsername :: String
   , lfPassword :: String
+  , lfRemember :: Bool
   } deriving (Eq, Show)
 
 
 #if MIN_VERSION_servant (0,9,0)
 instance FromForm LoginForm where
   fromForm f = do
-    username <- fmap T.unpack $ lookupUnique "username" f
-    password <- fmap T.unpack $ lookupUnique "password" f
-    return LoginForm
-      { lfUsername = username
-      , lfPassword = password }
+    lfUsername <- fmap T.unpack $ lookupUnique "username" f
+    lfPassword <- fmap T.unpack $ lookupUnique "password" f
+    lfRemember <- fmap (maybe False (const True)) $ lookupMaybe "remember" f
+    return LoginForm {..}
 
 instance ToForm LoginForm where
   toForm LoginForm {..} =
     [ ("username", toQueryParam lfUsername)
-    , ("password", toQueryParam lfPassword) ]
+    , ("password", toQueryParam lfPassword)
+    , ("remember", toQueryParam $ if lfRemember then (Just ()) else Nothing) ]
 #else
 instance FromFormUrlEncoded LoginForm where
   fromFormUrlEncoded d = do
-    username <- case lookup "username" d of
+    lfUsername <- case lookup "username" d of
       Nothing -> Left "username field is missing"
       Just  x -> return (T.unpack x)
-    password <- case lookup "password" d of
+    lfPassword <- case lookup "password" d of
       Nothing -> Left "password field is missing"
       Just  x -> return (T.unpack x)
-    return LoginForm
-      { lfUsername = username
-      , lfPassword = password }
+    lfRemember <- case lookup "remember" d of
+      Nothing -> return False
+      Just    -> return True
+    return LoginForm {..}
 
 instance ToFormUrlEncoded LoginForm where
   toFormUrlEncoded LoginForm {..} =
     [ ("username", toQueryParam lfUsername)
-    , ("password", toQueryParam lfPassword) ]
+    , ("password", toQueryParam lfPassword)
+    , ("remember", toQueryParam $ if lfRemember then (Just ()) else Nothing) ]
 #endif
 
 ----------------------------------------------------------------------------
@@ -311,6 +314,10 @@ loginPage firstTime = H.docTypeHtml $ do
         H.tr $ do
          H.td "password:"
          H.td (H.input ! A.type_ "password" ! A.name "password")
+        H.tr $ do
+         H.td ! A.colspan "2" $ H.label $ do
+           H.input ! A.type_ "checkbox" ! A.name "remember" ! A.checked ""
+           "Remember me"
       H.input ! A.type_ "submit"
     unless firstTime $
       H.p "Incorrect username/password"
