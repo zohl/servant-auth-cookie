@@ -22,6 +22,7 @@ import Servant.Server.Experimental.Auth.Cookie
 import Network.HTTP.Types (Header, methodGet, methodPost, hContentType, hCookie)
 import Network.HTTP.Media.RenderHeader (renderHeader)
 import Network.Wai.Test (SResponse(..))
+import Web.Cookie (parseCookies)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC8
@@ -101,6 +102,12 @@ basicSpec :: SpecState -> Spec
 basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
   (return $ app ssAuthSettings ssGenerateKey ssRandomSource ssServerKeySet) $ do
 
+  let form = LoginForm {
+          lfUsername = "mr_foo"
+        , lfPassword = "password1"
+        , lfRemember = False
+        }
+
   context "home page" $ do
     it "responds successfully" $ do
       get "/" `shouldRespondWithMarkup` homePage
@@ -110,39 +117,50 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
       get "/login" `shouldRespondWithMarkup` (loginPage True)
 
     it "shows message on incorrect login" $ do
-      login "noname" "noname" `shouldRespondWithMarkup` (loginPage False)
+      (login form { lfPassword = "wrong" }) `shouldRespondWithMarkup` (loginPage False)
+
+    let hasExpirationHeaders
+          = not . null
+          . filter ((`elem` ["Max-Age", "Expires"]) . fst)
+          . parseCookies
+
+    it "responds with session cookies if 'Remember me' is not set" $ do
+      (login form { lfRemember = False }
+        >>= return . hasExpirationHeaders . getCookieValue)
+        >>= liftIO . (`shouldBe` False)
+
+    it "responds with normal cookies if `Remember me` is set" $ do
+      (login form { lfRemember = True }
+        >>= return . hasExpirationHeaders . getCookieValue)
+        >>= liftIO . (`shouldBe` True)
 
   context "private page" $ do
-    let loginRequest = login "mr_foo" "password1"
 
     it "rejects requests without cookies" $ do
       get "/private" `shouldRespondWith` 403 { matchBody = matchBody' "No cookies" }
 
     it "accepts requests with proper cookies" $ do
-      (SResponse {..}) <- loginRequest
-      let cookieValue = fromMaybe
-            (error "cookies aren't available")
-            (lookup "set-cookie" simpleHeaders)
-      getPrivate cookieValue `shouldRespondWith` 200
+      (login form
+         >>= return . getCookieValue
+         >>= getPrivate) `shouldRespondWith` 200
 
     it "accepts requests with proper cookies (sanity check)" $ do
-      cookieValue <- loginRequest
+      (login form
         >>= liftIO . forgeCookies ss authSettings ssServerKeySet
-      getPrivate cookieValue `shouldRespondWith` 200
+        >>= getPrivate) `shouldRespondWith` 200
 
     it "rejects requests with incorrect MAC" $ do
       let newServerKeySet = mkPersistentServerKey "0000000000000000"
-      cookieValue <- loginRequest
+      (login form
         >>= liftIO . forgeCookies ss authSettings newServerKeySet
-      getPrivate cookieValue `shouldRespondWithException` (IncorrectMAC "")
+        >>= getPrivate) `shouldRespondWithException` (IncorrectMAC "")
 
     it "rejects requests with expired cookies" $ do
       let newAuthSettings = authSettings { acsMaxAge = 0 }
-      cookieValue <- loginRequest
-        >>= liftIO . forgeCookies ss newAuthSettings ssServerKeySet
       let t = UTCTime (toEnum 0) 0
-      getPrivate cookieValue `shouldRespondWithException` (CookieExpired t t)
-
+      (login form
+        >>= liftIO . forgeCookies ss newAuthSettings ssServerKeySet
+        >>= getPrivate) `shouldRespondWithException` (CookieExpired t t)
 
 #if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 renewalSpec :: SpecState -> Spec
@@ -167,14 +185,14 @@ renewalSpec (SpecState {..}) = describe "renewal functionality" $ with
       liftIO $ keys' `shouldBe` (init keys)
 
   context "cookies" $ do
-    let loginRequest = login "mr_foo" "password1"
-
-    let getCookieValue req = req >>= \resp -> return $ fromMaybe
-          (error "cookies aren't available")
-          (lookup "set-cookie" $ simpleHeaders resp)
+    let form = LoginForm {
+            lfUsername = "mr_foo"
+          , lfPassword = "password1"
+          , lfRemember = False
+          }
 
     it "rejects requests with deleted keys" $ do
-      cookieValue <- getCookieValue loginRequest
+      cookieValue <- getCookieValue <$> login form
       getPrivate cookieValue `shouldRespondWith` 200
 
       key <- head <$> extractKeys
@@ -183,18 +201,18 @@ renewalSpec (SpecState {..}) = describe "renewal functionality" $ with
       getPrivate cookieValue `shouldRespondWith` 403
 
     it "accepts requests with old key and renews cookie" $ do
-      cookieValue <- getCookieValue loginRequest
+      cookieValue <- getCookieValue <$> login form
       getPrivate cookieValue `shouldRespondWith` 200
 
       key <- head <$> extractKeys
       addKey
-      newCookieValue <- getCookieValue (getPrivate cookieValue)
+      newCookieValue <- getCookieValue <$> getPrivate cookieValue
 
       remKey key
       getPrivate newCookieValue `shouldRespondWith` 200
 
     it "does not renew cookies for the newest key" $ do
-      cookieValue <- getCookieValue loginRequest
+      cookieValue <- getCookieValue <$> login form
       _ <- getPrivate cookieValue `shouldRespondWith` 200
       r <- getPrivate cookieValue
       liftIO $ (lookup "set-cookie" $ simpleHeaders r) `shouldBe` Nothing
@@ -237,9 +255,9 @@ formContentType = (
     hContentType
   , renderHeader $ contentType (Proxy :: Proxy FormUrlEncoded))
 
-login :: String -> String -> WaiSession SResponse
-login lfUsername lfPassword = request
-  methodPost "/login" [formContentType] (encode LoginForm {..})
+login :: LoginForm -> WaiSession SResponse
+login lf = request
+  methodPost "/login" [formContentType] (encode lf)
 
 getPrivate :: BS.ByteString -> WaiSession SResponse
 getPrivate cookieValue = request
@@ -286,3 +304,7 @@ remKey :: BS.ByteString -> WaiSession ()
 remKey key = void $ get $ "/keys/rem/" <> (urlEncode True $ key)
 #endif
 
+getCookieValue :: SResponse -> BSC8.ByteString
+getCookieValue = fromMaybe (error "cookies aren't available")
+               . lookup "set-cookie"
+               . simpleHeaders
