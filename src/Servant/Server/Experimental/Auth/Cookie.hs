@@ -26,6 +26,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 
 module Servant.Server.Experimental.Auth.Cookie
@@ -60,6 +61,8 @@ module Servant.Server.Experimental.Auth.Cookie
   , mkRenewableKeySet
 
   , AuthCookieSettings (..)
+  , SessionSettings (..)
+  , ExpirationType (..)
 
   , EncryptedSession (..)
   , emptyEncryptedSession
@@ -127,6 +130,7 @@ import Data.Serialize (Serialize(..))
 import Data.Time
 import Data.Tagged (Tagged (..), retag)
 import Data.Typeable
+import GHC.Generics (Generic)
 import GHC.TypeLits (Symbol)
 import Network.HTTP.Types (hCookie, HeaderName, RequestHeaders, ResponseHeaders)
 import Network.Wai (Request, requestHeaders)
@@ -180,20 +184,35 @@ type CipherAlgorithm c = c -> IV c -> ByteString -> ByteString
 -- | A type family that maps user-defined data to 'AuthServerData'.
 type family AuthCookieData
 
+data ExpirationType
+   = Expires -- ^ cookies will be provided with 'Expires' flag. Deprecated in favour of 'Max-Age'.
+   | MaxAge  -- ^ cookies will be provided with 'Max-Age' flag. Doesn't work with older versions of IE.
+   | Session -- ^ cookies will be removed when the user closes the browser.
+   deriving (Eq, Show, Generic)
+
+instance Default ExpirationType where
+  def = Session
+
+instance Serialize ExpirationType
+
+
 -- | Wrapper for session value that goes into cookies' payload.
 data PayloadWrapper a = PayloadWrapper {
     pwSession    :: a
+  , pwSettings   :: SessionSettings
   , pwExpiration :: UTCTime
   }
 
 instance (Serialize a) => Serialize (PayloadWrapper a) where
   put PayloadWrapper {..} = do
     put pwSession
+    put pwSettings
     put (toModifiedJulianDay . utctDay $ pwExpiration)
     put (diffTimeToPicoseconds . utctDayTime $ pwExpiration)
 
   get = do
     pwSession    <- get
+    pwSettings   <- get
     pwExpiration <- UTCTime
       <$> (ModifiedJulianDay <$> get)
       <*> (picosecondsToDiffTime <$> get)
@@ -202,6 +221,7 @@ instance (Serialize a) => Serialize (PayloadWrapper a) where
 -- | Wrapper for session value with metadata that doesn't go into payload.
 data ExtendedPayloadWrapper a = ExtendedPayloadWrapper {
     epwSession    :: a
+  , epwSettings   :: SessionSettings
   , epwExpiration :: UTCTime
   , epwRenew      :: Bool
   }
@@ -480,6 +500,17 @@ instance Default AuthCookieSettings where
     , acsEncryptAlgorithm = ctrCombine
     , acsDecryptAlgorithm = ctrCombine }
 
+
+-- | Options that determine session mechanisms. Use 'def' to get
+-- default value of this type.
+
+data SessionSettings = SessionSettings {
+    ssExpirationType :: ExpirationType
+  } deriving (Generic)
+
+instance Serialize SessionSettings
+instance Default SessionSettings
+
 ----------------------------------------------------------------------------
 -- Encrypt/decrypt session
 
@@ -495,9 +526,10 @@ encryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> RandomSource       -- ^ Random source to use
   -> k                  -- ^ Instance of 'ServerKeySet' to use
+  -> SessionSettings    -- ^ Session settings
   -> a                  -- ^ Session value
   -> m (Tagged SerializedEncryptedCookie ByteString)  -- ^ Serialized and encrypted session
-encryptSession AuthCookieSettings {..} rs sks pwSession = do
+encryptSession AuthCookieSettings {..} rs sks pwSettings pwSession = do
   pwExpiration  <- liftM (addUTCTime acsMaxAge) (liftIO getCurrentTime)
   cookieIV      <- mkIV rs acsCipher
   sk            <- (Tagged . fst) <$> getKeys sks
@@ -543,6 +575,7 @@ decryptSession AuthCookieSettings {..} sks s = do
 
   return ExtendedPayloadWrapper {
       epwSession    = pwSession
+    , epwSettings   = pwSettings
     , epwExpiration = pwExpiration
     , ..}
 
@@ -560,11 +593,12 @@ addSession
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> RandomSource       -- ^ Random source to use
   -> k                  -- ^ Instance of 'ServerKeySet' to use
+  -> SessionSettings    -- ^ Session settings
   -> a                  -- ^ The session value
   -> s                  -- ^ Response to add session to
   -> m r                -- ^ Response with the session added
-addSession acs rs sk sessionData response = do
-  header <- renderSession acs rs sk sessionData
+addSession acs rs sk pwSettings pwSession response = do
+  header <- renderSession acs rs sk pwSettings pwSession
   return (addHeader (EncryptedSession header) response)
 
 -- |  "Remove" a session by invalidating the cookie.
@@ -578,7 +612,6 @@ removeSession acs response =
 
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
-
 addSessionToErr
   :: ( MonadIO m
      , MonadThrow m
@@ -587,11 +620,12 @@ addSessionToErr
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> RandomSource       -- ^ Random source to use
   -> k                  -- ^ Instance of 'ServerKeySet' to use
+  -> SessionSettings    -- ^ Session settings
   -> a                  -- ^ The session value
   -> ServantErr         -- ^ Servant error to add the cookie to
   -> m ServantErr
-addSessionToErr acs rs sk sessionData err = do
-  header <- renderSession acs rs sk sessionData
+addSessionToErr acs rs sk pwSettings pwSession err = do
+  header <- renderSession acs rs sk pwSettings pwSession
   return err { errHeaders = (hSetCookie, header) : errHeaders err }
 
 -- |  "Remove" a session by invalidating the cookie.
@@ -685,17 +719,32 @@ renderSession
   => AuthCookieSettings
   -> RandomSource
   -> k
+  -> SessionSettings
   -> a
   -> m ByteString
-renderSession acs@AuthCookieSettings {..} rs sk sessionData = do
-  Tagged sessionBinary <- encryptSession acs rs sk sessionData
-  let cookies =
-        (acsSessionField, sessionBinary) :
-        ("Path",    acsPath) :
-        ("Max-Age", (BSC8.pack . show . n) acsMaxAge) :
-        ((,"") <$> acsCookieFlags)
-      n = floor :: NominalDiffTime -> Int
+renderSession acs@AuthCookieSettings {..} rs sk pwSettings pwSession = do
+  Tagged sessionBinary <- encryptSession acs rs sk pwSettings pwSession
+  expiration           <- renderExpiration acsMaxAge (ssExpirationType pwSettings)
+
+  let cookies
+        = (acsSessionField, sessionBinary)
+        : ("Path", acsPath)
+        : ( (maybe id (:) expiration)
+          $ ((,"") <$> acsCookieFlags))
   (return . toByteString . renderCookies) cookies
+
+
+-- | Render expiration value depending on it's type.
+renderExpiration :: (MonadIO m) => NominalDiffTime -> ExpirationType -> m (Maybe (ByteString, ByteString))
+
+renderExpiration maxAge Expires
+  = liftM (addUTCTime maxAge) (liftIO getCurrentTime)
+  >>= \t -> return . Just $ ("Expires", BSC8.pack $ formatTime defaultTimeLocale "%a, %d %b %Y %H:%M:%S GMT" t)
+
+renderExpiration maxAge MaxAge = return . Just $ ("Max-Age", (BSC8.pack . show . n) maxAge)
+  where n = floor :: NominalDiffTime -> Int
+
+renderExpiration _ Session = return Nothing
 
 
 #if MIN_VERSION_servant(0,9,1)
@@ -735,7 +784,7 @@ class CookiedWrapperClass f r c where
 instance (Serialize c)
          => CookiedWrapperClass (Handler b) (Handler (Cookied b)) c where
   wrapCookied _               Nothing                    = fmap noHeader
-  wrapCookied (acs, rs, k, _) (Just PayloadWrapper {..}) = (>>= addSession acs rs k pwSession)
+  wrapCookied (acs, rs, k, _) (Just PayloadWrapper {..}) = (>>= addSession acs rs k pwSettings pwSession)
 
 -- When the next argument is the one that should wrapped: wrap it and carry it's value to the result.
 instance (Serialize c, CookiedWrapperClass b b' c)
@@ -743,7 +792,8 @@ instance (Serialize c, CookiedWrapperClass b b' c)
   wrapCookied env _ f = \ExtendedPayloadWrapper {..} -> let
     mc = if epwRenew
          then (Just PayloadWrapper {
-                    pwSession = epwSession
+                    pwSession    = epwSession
+                  , pwSettings   = epwSettings
                   , pwExpiration = epwExpiration})
          else Nothing
     in wrapCookied env mc (f epwSession)
