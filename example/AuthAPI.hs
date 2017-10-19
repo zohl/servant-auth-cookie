@@ -27,7 +27,9 @@ import Control.Monad (void, unless, when)
 import Data.ByteString.Lazy (fromStrict)
 import Data.Default (def)
 import Data.List (find)
+import Data.Maybe (catMaybes)
 import Data.Serialize (Serialize)
+import GHC.Exts (fromList)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application)
@@ -116,10 +118,12 @@ instance FromForm LoginForm where
     return LoginForm {..}
 
 instance ToForm LoginForm where
-  toForm LoginForm {..} =
-    [ ("username", toQueryParam lfUsername)
-    , ("password", toQueryParam lfPassword)
-    , ("remember", toQueryParam $ if lfRemember then (Just ()) else Nothing) ]
+  toForm LoginForm {..} = fromList $
+      ("username", toQueryParam lfUsername)
+    : ("password", toQueryParam lfPassword)
+    : (catMaybes $ [
+        if lfRemember then Just ("remember", toQueryParam ()) else Nothing
+      ])
 #else
 instance FromFormUrlEncoded LoginForm where
   fromFormUrlEncoded d = do
@@ -135,10 +139,12 @@ instance FromFormUrlEncoded LoginForm where
     return LoginForm {..}
 
 instance ToFormUrlEncoded LoginForm where
-  toFormUrlEncoded LoginForm {..} =
-    [ ("username", toQueryParam lfUsername)
-    , ("password", toQueryParam lfPassword)
-    , ("remember", toQueryParam $ if lfRemember then (Just ()) else Nothing) ]
+  toFormUrlEncoded LoginForm {..} = fromList $
+      ("username", toQueryParam lfUsername)
+    : ("password", toQueryParam lfPassword)
+    : (catMaybes $ [
+        if lfRemember then Just ("remember", toQueryParam ()) else Nothing
+      ])
 #endif
 
 ----------------------------------------------------------------------------
@@ -204,6 +210,7 @@ server settings _generateKey rs sks =
     case userLookup lfUsername lfPassword usersDB of
       Nothing   -> return $ addHeader emptyEncryptedSession (loginPage False)
       Just uid  -> addSession'
+        (def { ssExpirationType = if lfRemember then MaxAge else Session })
         (Account uid lfUsername lfPassword)
         (redirectPage "/private" "Session has been started")
 

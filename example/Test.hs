@@ -6,6 +6,7 @@
 
 import Prelude ()
 import Prelude.Compat
+import Data.Default (def)
 import Data.Maybe (fromMaybe)
 import Data.Int (Int64)
 import Data.Time.Clock (UTCTime(..))
@@ -276,7 +277,7 @@ forgeCookies :: (ServerKeySet k)
   -> SResponse
   -> IO BS.ByteString
 forgeCookies ss newAuthSettings newServerKeySet r = extractSession ss r
-  >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet . epwSession
+  >>= renderSession newAuthSettings (ssRandomSource ss) newServerKeySet def . epwSession
 
 #if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 extractKeys :: WaiSession [BS.ByteString]

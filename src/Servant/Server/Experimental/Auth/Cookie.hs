@@ -506,7 +506,7 @@ instance Default AuthCookieSettings where
 
 data SessionSettings = SessionSettings {
     ssExpirationType :: ExpirationType
-  } deriving (Generic)
+  } deriving (Show, Eq, Generic)
 
 instance Serialize SessionSettings
 instance Default SessionSettings

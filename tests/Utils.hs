@@ -180,7 +180,7 @@ roundTrip
 roundTrip settings modify p x = do
   rs <- mkRandomSource drgNew 1000
   sk <- mkPersistentServerKey <$> generateRandomBytes 16
-  encryptSession settings rs sk x >>= modify settings rs sk p >>= (fmap epwSession . decryptSession settings sk)
+  encryptSession settings rs sk def x >>= modify settings rs sk p >>= (fmap epwSession . decryptSession settings sk)
 
 
 class (HashAlgorithm h) => NamedHashAlgorithm h where
