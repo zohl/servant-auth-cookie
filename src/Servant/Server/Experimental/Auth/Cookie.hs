@@ -137,7 +137,7 @@ import Network.Wai (Request, requestHeaders)
 import Servant (addHeader, ServantErr (..))
 import Servant.API.Experimental.Auth (AuthProtect)
 import Servant.API.ResponseHeaders (AddHeader)
-import Servant.Server (Handler, err403)
+import Servant.Server (err403)
 import Servant.Server.Experimental.Auth
 import Web.Cookie
 import qualified Crypto.MAC.HMAC        as H
@@ -150,6 +150,13 @@ import qualified Network.HTTP.Types as N(Header)
 
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative
+#endif
+
+#if MIN_VERSION_servant(0,7,0)
+import Servant.Server (Handler)
+#else
+import Control.Monad.Except (ExceptT)
+import Servant.Server (ServantErr)
 #endif
 
 #if MIN_VERSION_servant(0,9,0)
@@ -167,6 +174,12 @@ import qualified Servant.API.Header as S(Header)
 
 #if MIN_VERSION_http_types(0,9,2)
 import Network.HTTP.Types (hSetCookie)
+#endif
+
+
+#if MIN_VERSION_servant(0,7,0)
+#else
+type Handler = ExceptT ServantErr IO
 #endif
 
 #if MIN_VERSION_http_types(0,9,2)

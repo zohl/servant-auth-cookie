@@ -51,7 +51,7 @@ import qualified Data.ByteString.Char8 as BSC8
 import Control.Monad.Catch (MonadThrow (..))
 
 #if !MIN_VERSION_base(4,8,0)
-import Control.Applicative ()
+import Control.Applicative ((<$>), (<*>))
 #endif
 
 

@@ -54,6 +54,7 @@ import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 #endif
 
+import Debug.Trace (traceShowId)
 
 data SpecState where
   SpecState :: (ServerKeySet k) =>
@@ -281,7 +282,7 @@ forgeCookies ss newAuthSettings newServerKeySet r = extractSession ss r
 
 #if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 extractKeys :: WaiSession [BS.ByteString]
-extractKeys = (extractKeys' . BSL.toStrict . simpleBody) <$> get "/keys" where
+extractKeys = (extractKeys' . traceShowId . BSL.toStrict . simpleBody) <$> get "/keys" where
   del = '#'
 
   (openTag, closeTag) = (id *** BS.drop 1) $ BSC8.span (/= del) $

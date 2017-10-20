@@ -219,6 +219,9 @@ server settings _generateKey rs sks =
 #if MIN_VERSION_servant(0,9,1)
   servePrivate = cookied settings rs sks (Proxy :: Proxy Account) servePrivate'
 
+  servePrivate' :: Account -> Handler Markup
+  servePrivate' (Account uid u p) = return $ privatePage uid u p
+
   serveWhoami Nothing = return $ whoamiPage Nothing
   serveWhoami (Just h) = do
     mwm <- getHeaderSession settings sks h `catch` handleEx
@@ -228,11 +231,11 @@ server settings _generateKey rs sks =
       handleEx _ex = return Nothing
 #else
   servePrivate = return . servePrivate' . wmData
+
+  servePrivate' :: Account -> Handler Markup
   servePrivate' (Account uid u p) = privatePage uid u p
 #endif
 
-  servePrivate' :: Account -> Handler Markup
-  servePrivate' (Account uid u p) = return $ privatePage uid u p
 
 #if MIN_VERSION_servant(0,9,1)
   serveKeys = (keysPage True <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey
