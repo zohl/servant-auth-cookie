@@ -137,7 +137,7 @@ import Network.Wai (Request, requestHeaders)
 import Servant (addHeader, ServantErr (..))
 import Servant.API.Experimental.Auth (AuthProtect)
 import Servant.API.ResponseHeaders (AddHeader)
-import Servant.Server (err403)
+import Servant.Server (Handler, err403)
 import Servant.Server.Experimental.Auth
 import Web.Cookie
 import qualified Crypto.MAC.HMAC        as H
@@ -160,7 +160,7 @@ import Data.ByteString.Conversion (ToByteString (..))
 #endif
 
 #if MIN_VERSION_servant(0,9,1)
-import Servant (noHeader, Handler)
+import Servant (noHeader)
 import Servant.API.ResponseHeaders (Headers)
 import qualified Servant.API.Header as S(Header)
 #endif
@@ -547,7 +547,7 @@ encryptSession :: (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
 encryptSession AuthCookieSettings {..} rs sks pwSettings pwSession = do
   pwExpiration  <- liftM (addUTCTime acsMaxAge) (liftIO getCurrentTime)
   cookieIV      <- mkIV rs acsCipher
-  sk            <- (Tagged . fst) <$> getKeys sks
+  sk            <- liftM (Tagged . fst) (getKeys sks)
   key           <- mkCookieKey acsCipher acsHashAlgorithm sk cookieIV
   cookiePayload <- applyCipherAlgorithm acsEncryptAlgorithm cookieIV key (cerealEncode PayloadWrapper {..})
   cookiePadding <- mkPadding rs acsCipher cookiePayload
@@ -882,14 +882,14 @@ mkCookieKey
   -> Tagged ServerKeyBytes ByteString
   -> Tagged IVBytes ByteString
   -> m (Tagged CookieKeyBytes ByteString)
-mkCookieKey c h (Tagged sk) (Tagged iv) = Tagged <$> mkProperKey (cipherKeySize (unProxy c)) (sign h sk iv)
+mkCookieKey c h (Tagged sk) (Tagged iv) = liftM Tagged $ mkProperKey (cipherKeySize (unProxy c)) (sign h sk iv)
 
 -- | Generates random initial vector.
 mkIV :: (MonadIO m, BlockCipher c)
   => RandomSource
   -> Proxy c
   -> m (Tagged IVBytes ByteString)
-mkIV rs c = Tagged <$> getRandomBytes rs (blockSize (unProxy c))
+mkIV rs c = liftM Tagged $ getRandomBytes rs (blockSize (unProxy c))
 
 -- | Generates padding of random bytes to align payload's length.
 mkPadding :: (MonadIO m, BlockCipher c)
@@ -897,7 +897,7 @@ mkPadding :: (MonadIO m, BlockCipher c)
   -> Proxy c
   -> Tagged PayloadBytes ByteString
   -> m (Tagged PaddingBytes ByteString)
-mkPadding rs c (Tagged payload) = Tagged <$> getRandomBytes rs l where
+mkPadding rs c (Tagged payload) = liftM Tagged $ getRandomBytes rs l where
   bs = blockSize (unProxy c)
   n  = BS.length payload
   l  = (bs - (n `rem` bs)) `rem` bs
