@@ -184,6 +184,7 @@ type CipherAlgorithm c = c -> IV c -> ByteString -> ByteString
 -- | A type family that maps user-defined data to 'AuthServerData'.
 type family AuthCookieData
 
+-- | How to represent expiration to the client's browser.
 data ExpirationType
    = Expires -- ^ cookies will be provided with 'Expires' flag. Deprecated in favour of 'Max-Age'.
    | MaxAge  -- ^ cookies will be provided with 'Max-Age' flag. Doesn't work with older versions of IE.
@@ -298,33 +299,47 @@ instance Exception AuthCookieException
 ----------------------------------------------------------------------------
 -- Tags for various bytestrings
 
--- | Tag encrypted cookie
+-- | Tag for encrypted cookie.
 data EncryptedCookie
 
--- | Tag for base64 serialized and encrypted cookie
+-- | Tag for base64 serialized and encrypted cookie.
 data SerializedEncryptedCookie
 
+-- | Tag for raw server key bytes.
 data ServerKeyBytes
+
+-- | Tag raw cookie key bytes.
 data CookieKeyBytes
 
+-- | Tag for IV bytes.
 data IVBytes
+
+-- | Tag for encrypted or raw payload bytes.
 data PayloadBytes
+
+-- | Tag for pading bytes.
 data PaddingBytes
+
+-- | Tag for MAC of a cookie.
 data MACBytes
 
 
+-- | Wrapper for 'Base64.encode'.
 base64Encode :: Tagged EncryptedCookie ByteString -> Tagged SerializedEncryptedCookie ByteString
 base64Encode = retag . fmap Base64.encode
 
+-- | Wrapper for 'Base64.decode'.
 base64Decode :: (MonadThrow m)
   => Tagged SerializedEncryptedCookie ByteString
   -> m (Tagged EncryptedCookie ByteString)
 base64Decode = either (throwM . SessionDeserializationFailed) return
              . fmap Tagged . Base64.decode . unTagged
 
+-- | Wrapper for 'Serialize.encode'.
 cerealEncode :: (Serialize a) => a -> Tagged b ByteString
 cerealEncode = Tagged . Serialize.encode
 
+-- | Wrapper for 'Serialize.decode'.
 cerealDecode :: (Serialize a, MonadThrow m) => Tagged b ByteString -> m a
 cerealDecode = either (throwM . SessionDeserializationFailed) return
              . Serialize.decode . unTagged
