@@ -42,6 +42,7 @@ module Servant.Server.Experimental.Auth.Cookie
 #if MIN_VERSION_servant(0,9,1)
   , Cookied
   , CookiedWrapper
+  , CookiedWrapperClass(..)
   , cookied
 #endif
 
@@ -797,6 +798,7 @@ cookied
   -> CookiedWrapper c   -- ^ Wrapper that transforms given functions.
 cookied acs rs k p = wrapCookied (acs, rs, k, p) Nothing
 
+-- | Class of functions that can be wrapped with 'cookied'.
 class CookiedWrapperClass f r c where
   wrapCookied
     :: (ServerKeySet k)
