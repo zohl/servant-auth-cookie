@@ -135,7 +135,7 @@ instance FromFormUrlEncoded LoginForm where
       Just  x -> return (T.unpack x)
     lfRemember <- case lookup "remember" d of
       Nothing -> return False
-      Just    -> return True
+      Just  _ -> return True
     return LoginForm {..}
 
 instance ToFormUrlEncoded LoginForm where
@@ -219,9 +219,6 @@ server settings _generateKey rs sks =
 #if MIN_VERSION_servant(0,9,1)
   servePrivate = cookied settings rs sks (Proxy :: Proxy Account) servePrivate'
 
-  servePrivate' :: Account -> Handler Markup
-  servePrivate' (Account uid u p) = return $ privatePage uid u p
-
   serveWhoami Nothing = return $ whoamiPage Nothing
   serveWhoami (Just h) = do
     mwm <- getHeaderSession settings sks h `catch` handleEx
@@ -230,12 +227,11 @@ server settings _generateKey rs sks =
       handleEx :: AuthCookieExceptionHandler
       handleEx _ex = return Nothing
 #else
-  servePrivate = return . servePrivate' . wmData
-
-  servePrivate' :: Account -> Handler Markup
-  servePrivate' (Account uid u p) = privatePage uid u p
+  servePrivate = servePrivate' . epwSession
 #endif
 
+  servePrivate' :: Account -> Handler Markup
+  servePrivate' (Account uid u p) = return $ privatePage uid u p
 
 #if MIN_VERSION_servant(0,9,1)
   serveKeys = (keysPage True <$> getKeys sks) :<|> serveAddKey :<|> serveRemKey

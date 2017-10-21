@@ -154,9 +154,6 @@ import Control.Applicative
 
 #if MIN_VERSION_servant(0,7,0)
 import Servant.Server (Handler)
-#else
-import Control.Monad.Except (ExceptT)
-import Servant.Server (ServantErr)
 #endif
 
 #if MIN_VERSION_servant(0,9,0)
