@@ -1,5 +1,5 @@
 name:                servant-auth-cookie
-version:             0.5.0.5
+version:             0.5.0.6
 synopsis:            Authentication via encrypted cookies
 description:         Authentication via encrypted client-side cookies,
                      inspired by client-session library by Michael Snoyman and based on
@@ -55,7 +55,7 @@ library
                , cryptonite     >= 0.14  && < 0.25
                , data-default
                , exceptions     >= 0.8   && < 0.9
-               , http-types     >= 0.9   && < 0.10
+               , http-types     >= 0.10  && < 0.11
                , memory         >= 0.11  && < 0.15
                , mtl            >= 2.0  && < 3.0
                , servant        >= 0.5   && < 0.12
@@ -132,7 +132,7 @@ executable example
                  , exceptions
                  , filepath
                  , http-media
-                 , http-types
+                 , http-types     >= 0.10  && < 0.11
                  , mtl            >= 2.0  && < 3.0
                  , servant        >= 0.5  && < 0.12
                  , servant-auth-cookie
@@ -189,7 +189,7 @@ test-suite example-tests
                  , directory
                  , filepath
                  , http-media
-                 , http-types
+                 , http-types     >= 0.10 && < 0.11
                  , hspec          >= 2.0  && < 3.0
                  , hspec-wai
                  , mtl            >= 2.0  && < 3.0
