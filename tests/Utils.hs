@@ -1,10 +1,11 @@
-{-# LANGUAGE CPP               #-}
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes        #-}
-{-# LANGUAGE RecordWildCards   #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE QuasiQuotes       #-}
+{-# LANGUAGE CPP                #-}
+{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE OverloadedStrings  #-}
+{-# LANGUAGE RankNTypes         #-}
+{-# LANGUAGE RecordWildCards    #-}
+{-# LANGUAGE TemplateHaskell    #-}
+{-# LANGUAGE QuasiQuotes        #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Utils (
     CBCMode
@@ -55,7 +56,7 @@ import Control.Applicative ((<$>), (<*>))
 #endif
 
 
-data Tree a = Leaf a | Node a [Tree a] deriving (Eq, Show, Generic)
+data Tree a = Leaf a | Node a [Tree a] deriving (Eq, Show, Generic, Typeable)
 
 instance Serialize a => Serialize (Tree a)
 

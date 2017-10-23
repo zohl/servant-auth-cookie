@@ -12,7 +12,7 @@ import Data.Int (Int64)
 import Data.Time.Clock (UTCTime(..))
 import Control.Monad.IO.Class (liftIO)
 import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..))
-import Test.Hspec (Spec, hspec, describe, context, it)
+import Test.Hspec (Spec, hspec, describe, context, it, shouldBe)
 import Test.Hspec.Wai (WaiSession, WaiExpectation, shouldRespondWith, with, request, get)
 import Text.Blaze.Renderer.Utf8 (renderMarkup)
 import Text.Blaze (Markup)
@@ -47,7 +47,7 @@ import Control.Monad (void, when)
 import Data.Monoid ((<>))
 import Control.Exception.Base (bracket)
 import Network.HTTP.Types (urlEncode)
-import Test.Hspec (shouldBe, shouldSatisfy)
+import Test.Hspec (shouldSatisfy)
 import System.Directory (removeDirectoryRecursive, doesDirectoryExist)
 import qualified Data.ByteString.Char8 as BSC8
 import qualified Text.Blaze.Html5 as H
@@ -306,7 +306,7 @@ remKey :: BS.ByteString -> WaiSession ()
 remKey key = void $ get $ "/keys/rem/" <> (urlEncode True $ key)
 #endif
 
-getCookieValue :: SResponse -> BSC8.ByteString
+getCookieValue :: SResponse -> BS.ByteString
 getCookieValue = fromMaybe (error "cookies aren't available")
                . lookup "set-cookie"
                . simpleHeaders
