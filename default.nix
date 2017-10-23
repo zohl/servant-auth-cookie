@@ -6,7 +6,7 @@
 }:
 mkDerivation {
   pname = "servant-auth-cookie";
-  version = "0.5.0.5";
+  version = "0.5.0.6";
   src = ./.;
   libraryHaskellDepends = [
     base base64-bytestring blaze-builder bytestring cereal cookie
