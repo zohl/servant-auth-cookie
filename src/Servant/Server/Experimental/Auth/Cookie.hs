@@ -608,60 +608,47 @@ decryptSession AuthCookieSettings {..} sks s = do
 ----------------------------------------------------------------------------
 -- Add/remove session
 
--- | Add cookie header to response. The function can throw the same
--- exceptions as 'encryptSession'.
-addSession
-  :: ( MonadIO m
-     , MonadThrow m
-     , Serialize a
-     , AddHeader (e :: Symbol) EncryptedSession s r
-     , ServerKeySet k )
+type AddSession r s = forall m a k. (MonadIO m, MonadThrow m, Serialize a, ServerKeySet k)
   => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
   -> RandomSource       -- ^ Random source to use
   -> k                  -- ^ Instance of 'ServerKeySet' to use
   -> SessionSettings    -- ^ Session settings
   -> a                  -- ^ The session value
-  -> s                  -- ^ Response to add session to
-  -> m r                -- ^ Response with the session added
+  -> r                  -- ^ The original response
+  -> m s                -- ^ Modified response
+
+type RemoveSession r s = forall m. (Monad m)
+  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
+  -> r                  -- ^ The original response
+  -> m s                -- ^ Modified response
+
+
+-- | Add cookie header to response. The function can throw the same
+-- exceptions as 'encryptSession'.
+addSession :: (AddHeader (e :: Symbol) EncryptedSession r s) => AddSession r s
 addSession acs rs sk pwSettings pwSession response = do
   header <- renderSession acs rs sk pwSettings pwSession
   return (addHeader (EncryptedSession header) response)
 
--- |  "Remove" a session by invalidating the cookie.
-removeSession  :: ( Monad m,
-                    AddHeader (e :: Symbol) EncryptedSession s r )
-  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> s                 -- ^ Response to return with  session removed
-  -> m r               -- ^ Response with the session "removed"
+-- | "Remove" a session by invalidating the cookie.
+removeSession :: (AddHeader (e :: Symbol) EncryptedSession r s) => RemoveSession r s
 removeSession acs response =
   return (addHeader (EncryptedSession $ expiredCookie acs) response)
 
+
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
-addSessionToErr
-  :: ( MonadIO m
-     , MonadThrow m
-     , Serialize a
-     , ServerKeySet k )
-  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> RandomSource       -- ^ Random source to use
-  -> k                  -- ^ Instance of 'ServerKeySet' to use
-  -> SessionSettings    -- ^ Session settings
-  -> a                  -- ^ The session value
-  -> ServantErr         -- ^ Servant error to add the cookie to
-  -> m ServantErr
+addSessionToErr :: AddSession ServantErr ServantErr
 addSessionToErr acs rs sk pwSettings pwSession err = do
   header <- renderSession acs rs sk pwSettings pwSession
   return err { errHeaders = (hSetCookie, header) : errHeaders err }
 
--- |  "Remove" a session by invalidating the cookie.
+-- | "Remove" a session by invalidating the cookie.
 -- Cookie expiry date is set at 0  and content is wiped
-removeSessionFromErr  :: ( Monad m )
-  => AuthCookieSettings -- ^ Options, see 'AuthCookieSettings'
-  -> ServantErr         -- ^ Servant error to add the cookie to
-  -> m ServantErr
+removeSessionFromErr :: RemoveSession ServantErr ServantErr
 removeSessionFromErr acs err =
   return $ err { errHeaders = (hSetCookie, expiredCookie acs) : errHeaders err }
+
 
 -- | Cookie expiry date is set at 0 and content is wiped.
 expiredCookie :: AuthCookieSettings -> ByteString
