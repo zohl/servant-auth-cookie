@@ -62,7 +62,7 @@ mkFileKey FileKSParams {..} = (,) <$> mkName <*> mkKey >>= uncurry writeFile whe
     >>= return
       . (fkspPath </>)
       . (<.> "b64")
-      . formatTime defaultTimeLocale (acsExpirationFormat def)
+      . formatTime defaultTimeLocale "%0Y%m%d%H%M%S"
     >>= \name -> do
       exists <- doesFileExist name
       if exists

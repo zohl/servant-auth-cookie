@@ -208,6 +208,12 @@ instance Default ExpirationType where
 instance Serialize ExpirationType
 
 
+-- | Format used in 'Expires' cookie field.
+expirationFormat :: String
+expirationFormat = "%a, %d %b %Y %H:%M:%S GMT"
+
+
+
 -- | Wrapper for session value that goes into cookies' payload.
 data PayloadWrapper a = PayloadWrapper {
     pwSession    :: a
@@ -500,8 +506,6 @@ data AuthCookieSettings where
     , acsMaxAge :: NominalDiffTime
       -- ^ For how long the cookie will be valid (corresponds to “Max-Age”
       -- attribute).
-    , acsExpirationFormat :: String
-      -- ^ Expiration format as in 'formatTime'.
     , acsPath :: ByteString
       -- ^ Scope of the cookie (corresponds to “Path” attribute).
     , acsHashAlgorithm :: Proxy h
@@ -519,7 +523,6 @@ instance Default AuthCookieSettings where
     { acsSessionField = "Session"
     , acsCookieFlags  = ["HttpOnly", "Secure"]
     , acsMaxAge       = fromIntegral (12 * 3600 :: Integer) -- 12 hours
-    , acsExpirationFormat = "%0Y%m%d%H%M%S"
     , acsPath         = "/"
     , acsHashAlgorithm = Proxy :: Proxy SHA256
     , acsCipher       = Proxy :: Proxy AES256
@@ -627,43 +630,27 @@ type RemoveSession r s = forall m. (Monad m)
 -- exceptions as 'encryptSession'.
 addSession :: (AddHeader (e :: Symbol) EncryptedSession r s) => AddSession r s
 addSession acs rs sk pwSettings pwSession response = do
-  header <- renderSession acs rs sk pwSettings pwSession
+  header <- renderSession acs rs sk pwSettings pwSession ()
   return (addHeader (EncryptedSession header) response)
 
 -- | "Remove" a session by invalidating the cookie.
 removeSession :: (AddHeader (e :: Symbol) EncryptedSession r s) => RemoveSession r s
 removeSession acs response =
-  return (addHeader (EncryptedSession $ expiredCookie acs) response)
-
+  return (addHeader (EncryptedSession $ renderExpiredSession acs) response)
 
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
 addSessionToErr :: AddSession ServantErr ServantErr
 addSessionToErr acs rs sk pwSettings pwSession err = do
-  header <- renderSession acs rs sk pwSettings pwSession
+  header <- renderSession acs rs sk pwSettings pwSession ()
   return err { errHeaders = (hSetCookie, header) : errHeaders err }
 
 -- | "Remove" a session by invalidating the cookie.
 -- Cookie expiry date is set at 0  and content is wiped
 removeSessionFromErr :: RemoveSession ServantErr ServantErr
 removeSessionFromErr acs err =
-  return $ err { errHeaders = (hSetCookie, expiredCookie acs) : errHeaders err }
+  return $ err { errHeaders = (hSetCookie, renderExpiredSession acs) : errHeaders err }
 
-
--- | Cookie expiry date is set at 0 and content is wiped.
-expiredCookie :: AuthCookieSettings -> ByteString
-expiredCookie AuthCookieSettings{..} = (toByteString . renderCookies) cookies
-  where
-    cookies =
-      (acsSessionField, "") :
-      ("Path",    acsPath) :
-      ("Expires", invalidDate) :
-      ((,"") <$> acsCookieFlags)
-    invalidDate = BSC8.pack $ formatTime
-      defaultTimeLocale
-      acsExpirationFormat
-      timeOrigin
-    timeOrigin = UTCTime (toEnum 0) 0
 
 -- | Request handler that checks cookies. If 'Cookie' is just missing, you
 -- get 'Nothing', but if something is wrong with its format, 'getSession'
@@ -700,6 +687,7 @@ getSession' headers acs@AuthCookieSettings {..} sk = maybe
   (liftM Just . decryptSession acs sk)
   (parseSessionRequest acs headers)
 
+
 parseSession
   :: AuthCookieSettings
   -> HeaderName
@@ -723,36 +711,40 @@ parseSessionResponse
   -> Maybe (Tagged SerializedEncryptedCookie ByteString)
 parseSessionResponse acs hdrs = parseSession acs hSetCookie hdrs
 
+
+renderSession'
+  :: AuthCookieSettings
+  -> (Tagged SerializedEncryptedCookie ByteString)
+  -> Maybe (ByteString, ByteString)
+  -> ByteString
+renderSession' AuthCookieSettings{..} (Tagged sessionBinary) expiration
+  = toByteString . renderCookies
+  $ (acsSessionField, sessionBinary)
+  : ("Path", acsPath)
+  : ((maybe id (:) expiration)
+    $ ((,"") <$> acsCookieFlags))
+
 -- | Render session cookie to 'ByteString'.
-renderSession
-  :: ( MonadIO m
-     , MonadThrow m
-     , Serialize a
-     , ServerKeySet k )
-  => AuthCookieSettings
-  -> RandomSource
-  -> k
-  -> SessionSettings
-  -> a
-  -> m ByteString
-renderSession acs@AuthCookieSettings {..} rs sk pwSettings pwSession = do
-  Tagged sessionBinary <- encryptSession acs rs sk pwSettings pwSession
-  expiration           <- renderExpiration acsMaxAge (ssExpirationType pwSettings)
+renderSession :: AddSession () ByteString
+renderSession acs rs sk pwSettings pwSession _ = liftM2 (renderSession' acs)
+  (encryptSession acs rs sk pwSettings pwSession)
+  (renderExpiration (acsMaxAge acs) (ssExpirationType pwSettings))
 
-  let cookies
-        = (acsSessionField, sessionBinary)
-        : ("Path", acsPath)
-        : ( (maybe id (:) expiration)
-          $ ((,"") <$> acsCookieFlags))
-  (return . toByteString . renderCookies) cookies
-
+-- | Render expired session to 'ByteString' (the date is set at 0 and the content is wiped).
+renderExpiredSession :: AuthCookieSettings -> ByteString
+renderExpiredSession acs = renderSession' acs (Tagged "") (Just ("Expires", longTimeAgo)) where
+  longTimeAgo = BSC8.pack $ formatTime
+    defaultTimeLocale
+    expirationFormat
+    timeOrigin
+  timeOrigin = UTCTime (toEnum 0) 0
 
 -- | Render expiration value depending on it's type.
 renderExpiration :: (MonadIO m) => NominalDiffTime -> ExpirationType -> m (Maybe (ByteString, ByteString))
 
 renderExpiration maxAge Expires
   = liftM (addUTCTime maxAge) (liftIO getCurrentTime)
-  >>= \t -> return . Just $ ("Expires", BSC8.pack $ formatTime defaultTimeLocale "%a, %d %b %Y %H:%M:%S GMT" t)
+  >>= \t -> return . Just $ ("Expires", BSC8.pack $ formatTime defaultTimeLocale expirationFormat t)
 
 renderExpiration maxAge MaxAge = return . Just $ ("Max-Age", (BSC8.pack . show . n) maxAge)
   where n = floor :: NominalDiffTime -> Int
