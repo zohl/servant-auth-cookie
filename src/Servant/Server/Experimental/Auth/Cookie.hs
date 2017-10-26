@@ -207,11 +207,9 @@ instance Default ExpirationType where
 
 instance Serialize ExpirationType
 
-
 -- | Format used in 'Expires' cookie field.
 expirationFormat :: String
 expirationFormat = "%a, %d %b %Y %H:%M:%S GMT"
-
 
 
 -- | Wrapper for session value that goes into cookies' payload.
@@ -496,7 +494,6 @@ mkRenewableKeySet rksHooks rksParameters userState = liftIO $ do
 
 -- | Options that determine authentication mechanisms. Use 'def' to get
 -- default value of this type.
-
 data AuthCookieSettings where
   AuthCookieSettings :: (HashAlgorithm h, BlockCipher c) =>
     { acsSessionField :: ByteString
@@ -505,7 +502,7 @@ data AuthCookieSettings where
       -- ^ Session cookie's flags
     , acsMaxAge :: NominalDiffTime
       -- ^ For how long the cookie will be valid (corresponds to “Max-Age”
-      -- attribute).
+      -- or "Expires" attribute).
     , acsPath :: ByteString
       -- ^ Scope of the cookie (corresponds to “Path” attribute).
     , acsHashAlgorithm :: Proxy h
@@ -532,13 +529,18 @@ instance Default AuthCookieSettings where
 
 -- | Options that determine session mechanisms. Use 'def' to get
 -- default value of this type.
-
 data SessionSettings = SessionSettings {
-    ssExpirationType :: ExpirationType
+    ssExpirationType :: ExpirationType -- ^ How to represent expiration to the client's browser.
+  , ssAutoRenew      :: Bool           -- ^ Whether to renew cookies automatically.
   } deriving (Show, Eq, Generic)
 
 instance Serialize SessionSettings
-instance Default SessionSettings
+
+instance Default SessionSettings where
+  def = SessionSettings {
+      ssExpirationType = def
+    , ssAutoRenew      = False
+    }
 
 ----------------------------------------------------------------------------
 -- Encrypt/decrypt session
@@ -589,7 +591,7 @@ decryptSession :: (MonadIO m, MonadThrow m, ServerKeySet k, Serialize a)
 decryptSession AuthCookieSettings {..} sks s = do
   Cookie {..} <- base64Decode s >>= cerealDecode
   let checkMAC sk = cookieMAC == mkMAC acsHashAlgorithm sk Cookie {..}
-  (sk, epwRenew) <- getKeys sks >>= \(currentKey, rotatedKeys) -> maybe
+  (sk, renew) <- getKeys sks >>= \(currentKey, rotatedKeys) -> maybe
       (throwM $ IncorrectMAC (unTagged cookieMAC))
       (return)
       . listToMaybe
@@ -602,11 +604,13 @@ decryptSession AuthCookieSettings {..} sks s = do
 
   (liftIO getCurrentTime) >>= \t -> when (t >= pwExpiration) $ throwM (CookieExpired pwExpiration t)
 
+  let SessionSettings {..} = pwSettings
   return ExtendedPayloadWrapper {
       epwSession    = pwSession
     , epwSettings   = pwSettings
     , epwExpiration = pwExpiration
-    , ..}
+    , epwRenew      = renew || ((ssExpirationType /= Session) && ssAutoRenew)
+    }
 
 ----------------------------------------------------------------------------
 -- Add/remove session
