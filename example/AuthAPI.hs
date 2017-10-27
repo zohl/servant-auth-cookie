@@ -106,6 +106,7 @@ data LoginForm = LoginForm
   { lfUsername :: String
   , lfPassword :: String
   , lfRemember :: Bool
+  , lfRenew    :: Bool
   } deriving (Eq, Show)
 
 
@@ -115,6 +116,7 @@ instance FromForm LoginForm where
     lfUsername <- fmap T.unpack $ lookupUnique "username" f
     lfPassword <- fmap T.unpack $ lookupUnique "password" f
     lfRemember <- fmap (maybe False (const True)) $ lookupMaybe "remember" f
+    lfRenew    <- fmap (maybe False (const True)) $ lookupMaybe "renew" f
     return LoginForm {..}
 
 instance ToForm LoginForm where
@@ -123,6 +125,7 @@ instance ToForm LoginForm where
     : ("password", toQueryParam lfPassword)
     : (catMaybes $ [
         if lfRemember then Just ("remember", toQueryParam ()) else Nothing
+      , if lfRenew    then Just ("renew",    toQueryParam ()) else Nothing
       ])
 #else
 instance FromFormUrlEncoded LoginForm where
@@ -136,6 +139,9 @@ instance FromFormUrlEncoded LoginForm where
     lfRemember <- case lookup "remember" d of
       Nothing -> return False
       Just  _ -> return True
+    lfRenew   <- case lookup "renew" d of
+      Nothing -> return False
+      Just  _ -> return True
     return LoginForm {..}
 
 instance ToFormUrlEncoded LoginForm where
@@ -144,6 +150,7 @@ instance ToFormUrlEncoded LoginForm where
     : ("password", toQueryParam lfPassword)
     : (catMaybes $ [
         if lfRemember then Just ("remember", toQueryParam ()) else Nothing
+      , if lfRenew    then Just ("renew",    toQueryParam ()) else Nothing
       ])
 #endif
 
@@ -210,7 +217,8 @@ server settings _generateKey rs sks =
     case userLookup lfUsername lfPassword usersDB of
       Nothing   -> return $ addHeader emptyEncryptedSession (loginPage False)
       Just uid  -> addSession'
-        (def { ssExpirationType = if lfRemember then MaxAge else Session })
+        (def { ssExpirationType = if lfRemember then MaxAge else Session
+             , ssAutoRenew      = lfRenew })
         (Account uid lfUsername lfPassword)
         (redirectPage "/private" "Session has been started")
 
@@ -324,6 +332,7 @@ loginPage firstTime = H.docTypeHtml $ do
          H.td ! A.colspan "2" $ H.label $ do
            H.input ! A.type_ "checkbox" ! A.name "remember" ! A.checked ""
            "Remember me"
+           H.input ! A.type_ "hidden" ! A.name "renew" ! A.value "1"
       H.input ! A.type_ "submit"
     unless firstTime $
       H.p "Incorrect username/password"

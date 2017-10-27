@@ -106,6 +106,7 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
           lfUsername = "mr_foo"
         , lfPassword = "password1"
         , lfRemember = False
+        , lfRenew    = False
         }
 
   context "home page" $ do
@@ -119,23 +120,22 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
     it "shows message on incorrect login" $ do
       (login form { lfPassword = "wrong" }) `shouldRespondWithMarkup` (loginPage False)
 
-    let hasExpirationHeaders
+    let hasExpirationFlags
           = not . null
           . filter ((`elem` ["Max-Age", "Expires"]) . fst)
           . parseCookies
 
     it "responds with session cookies if 'Remember me' is not set" $ do
       (login form { lfRemember = False }
-        >>= return . hasExpirationHeaders . getCookieValue)
+        >>= return . hasExpirationFlags . getCookieValue)
         >>= liftIO . (`shouldBe` False)
 
     it "responds with normal cookies if `Remember me` is set" $ do
       (login form { lfRemember = True }
-        >>= return . hasExpirationHeaders . getCookieValue)
+        >>= return . hasExpirationFlags . getCookieValue)
         >>= liftIO . (`shouldBe` True)
 
   context "private page" $ do
-
     it "rejects requests without cookies" $ do
       get "/private" `shouldRespondWith` 403 { matchBody = matchBody' "No cookies" }
 
@@ -161,6 +161,25 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
       (login form
         >>= liftIO . forgeCookies ss newAuthSettings ssServerKeySet
         >>= getPrivate) `shouldRespondWithException` (CookieExpired t t)
+
+    let hasSetCookieHeader
+          = maybe False (const True)
+          . lookup "set-cookie"
+          . simpleHeaders
+
+    it "doesn't renew cookies when renew flag is not set" $ do
+      (login (form { lfRemember = True, lfRenew = False })
+        >>= return . getCookieValue
+        >>= getPrivate
+        >>= return . hasSetCookieHeader)
+        >>= liftIO . (`shouldBe` False)
+
+    it "does renew cookies when renew flag is set" $ do
+      (login form { lfRemember = True, lfRenew = True }
+        >>= return . getCookieValue
+        >>= getPrivate
+        >>= return . hasSetCookieHeader)
+        >>= liftIO . (`shouldBe` True)
 
 #if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 renewalSpec :: SpecState -> Spec
@@ -189,6 +208,7 @@ renewalSpec (SpecState {..}) = describe "renewal functionality" $ with
             lfUsername = "mr_foo"
           , lfPassword = "password1"
           , lfRemember = False
+          , lfRenew    = False
           }
 
     it "rejects requests with deleted keys" $ do
