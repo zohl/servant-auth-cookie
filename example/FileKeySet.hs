@@ -23,7 +23,6 @@ import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Time.Clock (UTCTime(..), getCurrentTime)
 import Data.Time (formatTime, defaultTimeLocale)
-import Data.Default (def)
 import Data.List (sort)
 import Servant.Server.Experimental.Auth.Cookie
 import System.Directory (doesFileExist, getModificationTime, createDirectoryIfMissing, listDirectory, removeFile)

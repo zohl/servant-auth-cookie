@@ -331,7 +331,7 @@ loginPage firstTime = H.docTypeHtml $ do
         H.tr $ do
          H.td ! A.colspan "2" $ H.label $ do
            H.input ! A.type_ "checkbox" ! A.name "remember" ! A.checked ""
-           "Remember me"
+           _ <- "Remember me"
            H.input ! A.type_ "hidden" ! A.name "renew" ! A.value "1"
       H.input ! A.type_ "submit"
     unless firstTime $
