@@ -174,12 +174,14 @@ basicSpec ss@(SpecState {..}) = describe "basic functionality" $ with
         >>= return . hasSetCookieHeader)
         >>= liftIO . (`shouldBe` False)
 
+#if MIN_VERSION_servant(0,9,1)
     it "does renew cookies when renew flag is set" $ do
       (login form { lfRemember = True, lfRenew = True }
         >>= return . getCookieValue
         >>= getPrivate
         >>= return . hasSetCookieHeader)
         >>= liftIO . (`shouldBe` True)
+#endif
 
 #if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)
 renewalSpec :: SpecState -> Spec

@@ -149,8 +149,8 @@ instance ToFormUrlEncoded LoginForm where
       ("username", toQueryParam lfUsername)
     : ("password", toQueryParam lfPassword)
     : (catMaybes $ [
-        if lfRemember then Just ("remember", toQueryParam ()) else Nothing
-      , if lfRenew    then Just ("renew",    toQueryParam ()) else Nothing
+        if lfRemember then Just ("remember", "on") else Nothing
+      , if lfRenew    then Just ("renew",    "on") else Nothing
       ])
 #endif
 
