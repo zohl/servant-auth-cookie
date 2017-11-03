@@ -20,10 +20,8 @@ module AuthAPI (
 , loginPage
 ) where
 
-import Prelude ()
-import Prelude.Compat
-import Control.Monad.Catch (catch)
 import Control.Monad (void, unless, when)
+import Control.Monad.Catch (catch)
 import Data.ByteString.Lazy (fromStrict)
 import Data.Default (def)
 import Data.List (find)
@@ -33,19 +31,21 @@ import GHC.Exts (fromList)
 import GHC.Generics
 import Network.HTTP.Types (urlEncode)
 import Network.Wai (Application)
-import Servant (ReqBody, FormUrlEncoded, Header)
+import Prelude ()
+import Prelude.Compat
 import Servant ((:<|>)(..), (:>), errBody, err403, toQueryParam)
 import Servant (Post, AuthProtect, Get, Server, Proxy)
+import Servant (ReqBody, FormUrlEncoded, Header)
 import Servant (addHeader, serveWithContext, Proxy(..), Context(..))
 import Servant.HTML.Blaze
 import Servant.Server.Experimental.Auth (mkAuthHandler)
 import Servant.Server.Experimental.Auth.Cookie
 import Text.Blaze.Html5 ((!), Markup)
+import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Char8 as BSC8
 import qualified Data.Text as T
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
-import qualified Data.ByteString.Base64 as Base64
-import qualified Data.ByteString.Char8 as BSC8
 
 #if MIN_VERSION_servant (0,9,1)
 import Control.Monad.IO.Class (liftIO)

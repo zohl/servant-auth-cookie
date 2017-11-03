@@ -128,8 +128,8 @@ import Data.Maybe (listToMaybe)
 import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize (Serialize(..))
-import Data.Time
 import Data.Tagged (Tagged (..), retag)
+import Data.Time
 import Data.Typeable
 import GHC.Generics (Generic)
 import GHC.TypeLits (Symbol)
@@ -796,7 +796,7 @@ instance (Serialize c)
   wrapCookied _               Nothing                    = fmap noHeader
   wrapCookied (acs, rs, k, _) (Just PayloadWrapper {..}) = (>>= addSession acs rs k pwSettings pwSession)
 
--- When the next argument is the one that should wrapped: wrap it and carry it's value to the result.
+-- When the next argument is the one that should be wrapped: wrap it and carry it's value to the result.
 instance (Serialize c, CookiedWrapperClass b b' c)
          => CookiedWrapperClass (c -> b) ((ExtendedPayloadWrapper c) -> b') c where
   wrapCookied env _ f = \ExtendedPayloadWrapper {..} -> let

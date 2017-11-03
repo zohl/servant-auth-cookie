@@ -11,15 +11,15 @@ import Crypto.Cipher.AES (AES128, AES192, AES256)
 import Crypto.Cipher.Types ()
 import Crypto.Hash (SHA256(..),SHA384(..), SHA512(..))
 import Crypto.Random (drgNew)
-import qualified Data.ByteString as BS
 import Data.Default ()
 import Data.Proxy ()
 import Data.Time (UTCTime(..), NominalDiffTime, addUTCTime, getCurrentTime)
 import Servant.Server.Experimental.Auth.Cookie
 import Test.Hspec (Spec, context, shouldBe, shouldNotBe, it, describe, hspec)
-import Test.QuickCheck ()
 import Test.Hspec.QuickCheck (modifyMaxSuccess)
+import Test.QuickCheck ()
 import Utils
+import qualified Data.ByteString as BS
 
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<*>), (<$>))

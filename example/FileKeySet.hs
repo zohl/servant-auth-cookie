@@ -15,15 +15,15 @@ module FileKeySet (
 , mkFileKeySet
 ) where
 
+import Control.Concurrent (threadDelay)
+import Control.Monad (when)
+import Control.Monad.Catch (MonadThrow)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.List (sort)
+import Data.Time (formatTime, defaultTimeLocale)
+import Data.Time.Clock (UTCTime(..), getCurrentTime)
 import Prelude ()
 import Prelude.Compat
-import Control.Monad.Catch (MonadThrow)
-import Control.Monad (when)
-import Control.Concurrent (threadDelay)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Time.Clock (UTCTime(..), getCurrentTime)
-import Data.Time (formatTime, defaultTimeLocale)
-import Data.List (sort)
 import Servant.Server.Experimental.Auth.Cookie
 import System.Directory (doesFileExist, getModificationTime, createDirectoryIfMissing, listDirectory, removeFile)
 import System.FilePath.Posix ((</>), (<.>))

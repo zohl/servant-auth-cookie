@@ -3,11 +3,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
+
 import AuthAPI (app, authSettings)
-import Prelude ()
-import Prelude.Compat
 import Crypto.Random (drgNew)
 import Network.Wai.Handler.Warp (run)
+import Prelude ()
+import Prelude.Compat
 import Servant.Server.Experimental.Auth.Cookie
 
 #if MIN_VERSION_servant (0,9,1) && MIN_VERSION_directory (1,2,5)

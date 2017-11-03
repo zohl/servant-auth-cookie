@@ -10,11 +10,11 @@ let
 
   haskellPackages_ = haskellPackages.override {
     overrides = self: super: {
-      criterion = dontCheck (self.callPackage ../_deps/criterion-1.2.nix {});
-      cryptonite = dontCheck (self.callPackage ../_deps/cryptonite-0.24.nix {});
-      microstache = dontCheck (self.callPackage ../_deps/microstache-1.nix {});
-      statistics = dontCheck (self.callPackage ../_deps/statistics-0.14.0.2.nix {});
-      base-orphans = dontCheck (self.callPackage ../_deps/base-orphans-0.6.nix {});
+      # criterion = dontCheck (self.callPackage ../_deps/criterion-1.2.nix {});
+      # cryptonite = dontCheck (self.callPackage ../_deps/cryptonite-0.24.nix {});
+      # microstache = dontCheck (self.callPackage ../_deps/microstache-1.nix {});
+      # statistics = dontCheck (self.callPackage ../_deps/statistics-0.14.0.2.nix {});
+      # base-orphans = dontCheck (self.callPackage ../_deps/base-orphans-0.6.nix {});
     };
   };
 

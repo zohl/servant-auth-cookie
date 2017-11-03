@@ -4,25 +4,25 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TupleSections #-}
 
+import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..))
+import Control.Monad.IO.Class (liftIO)
+import Crypto.Random (drgNew)
+import Data.Default (def)
+import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
+import Data.Time.Clock (UTCTime(..))
+import Network.HTTP.Media.RenderHeader (renderHeader)
+import Network.HTTP.Types (Header, methodGet, methodPost, hContentType, hCookie)
+import Network.Wai.Test (SResponse(..))
 import Prelude ()
 import Prelude.Compat
-import Data.Default (def)
-import Data.Maybe (fromMaybe)
-import Data.Int (Int64)
-import Data.Time.Clock (UTCTime(..))
-import Control.Monad.IO.Class (liftIO)
-import AuthAPI (app, authSettings, LoginForm(..), homePage, loginPage, Account(..))
+import Servant (FormUrlEncoded, contentType)
+import Servant (Proxy(..))
+import Servant.Server.Experimental.Auth.Cookie
 import Test.Hspec (Spec, hspec, describe, context, it, shouldBe)
 import Test.Hspec.Wai (WaiSession, WaiExpectation, shouldRespondWith, with, request, get)
-import Text.Blaze.Renderer.Utf8 (renderMarkup)
 import Text.Blaze (Markup)
-import Servant (Proxy(..))
-import Crypto.Random (drgNew)
-import Servant (FormUrlEncoded, contentType)
-import Servant.Server.Experimental.Auth.Cookie
-import Network.HTTP.Types (Header, methodGet, methodPost, hContentType, hCookie)
-import Network.HTTP.Media.RenderHeader (renderHeader)
-import Network.Wai.Test (SResponse(..))
+import Text.Blaze.Renderer.Utf8 (renderMarkup)
 import Web.Cookie (parseCookies)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL

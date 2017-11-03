@@ -30,26 +30,26 @@ module Utils (
   , checkCookieExpired
   ) where
 
+import Control.Monad.Catch (MonadThrow (..))
 import Crypto.Cipher.Types (BlockCipher(..), Cipher(..))
 import Crypto.Hash (HashAlgorithm, SHA256(..), SHA384(..), SHA512(..))
 import Crypto.Random (drgNew)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
 import Data.Default (def)
+import Data.List (intercalate)
 import Data.Proxy (Proxy(..))
 import Data.Serialize (Serialize)
+import Data.Tagged (Tagged(..), unTagged)
 import Data.Time (addUTCTime)
+import Data.Typeable (Typeable, typeRep)
 import GHC.Generics (Generic)
+import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q)
 import Servant.Server.Experimental.Auth.Cookie
 import Test.Hspec (Spec, Selector, Expectation, shouldThrow, shouldReturn)
-import Test.QuickCheck (Arbitrary(..), Gen, vectorOf, oneof, choose, sized)
-import Data.List (intercalate)
 import Test.Hspec.QuickCheck (prop)
-import Data.Typeable (Typeable, typeRep)
-import Language.Haskell.TH.Syntax (Name, Type(..), Exp(..), Q)
-import Data.Tagged (Tagged(..), unTagged)
+import Test.QuickCheck (Arbitrary(..), Gen, vectorOf, oneof, choose, sized)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC8
-import Control.Monad.Catch (MonadThrow (..))
 
 #if !MIN_VERSION_base(4,8,0)
 import Control.Applicative ((<$>), (<*>))
