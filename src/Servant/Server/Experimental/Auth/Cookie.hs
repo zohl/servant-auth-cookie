@@ -130,6 +130,7 @@ import Data.Proxy
 import Data.Serialize (Serialize(..))
 import Data.Tagged (Tagged (..), retag)
 import Data.Time
+import Data.Time.Clock.Serialize ()
 import Data.Typeable
 import GHC.Generics (Generic)
 import GHC.TypeLits (Symbol)
@@ -217,22 +218,9 @@ data PayloadWrapper a = PayloadWrapper {
     pwSession    :: a
   , pwSettings   :: SessionSettings
   , pwExpiration :: UTCTime
-  }
+  } deriving (Generic)
 
-instance (Serialize a) => Serialize (PayloadWrapper a) where
-  put PayloadWrapper {..} = do
-    put pwSession
-    put pwSettings
-    put (toModifiedJulianDay . utctDay $ pwExpiration)
-    put (diffTimeToPicoseconds . utctDayTime $ pwExpiration)
-
-  get = do
-    pwSession    <- get
-    pwSettings   <- get
-    pwExpiration <- UTCTime
-      <$> (ModifiedJulianDay <$> get)
-      <*> (picosecondsToDiffTime <$> get)
-    return PayloadWrapper {..}
+instance (Serialize a) => Serialize (PayloadWrapper a)
 
 -- | Wrapper for session value with metadata that doesn't go into payload.
 data ExtendedPayloadWrapper a = ExtendedPayloadWrapper {

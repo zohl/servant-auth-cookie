@@ -10,6 +10,7 @@ let
 
   haskellPackages_ = haskellPackages.override {
     overrides = self: super: {
+      cereal-time = dontCheck (self.callPackage ../_deps/cereal-time-0.1.0.0.nix {});
       # criterion = dontCheck (self.callPackage ../_deps/criterion-1.2.nix {});
       # cryptonite = dontCheck (self.callPackage ../_deps/cryptonite-0.24.nix {});
       # microstache = dontCheck (self.callPackage ../_deps/microstache-1.nix {});
