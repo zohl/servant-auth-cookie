@@ -13,3 +13,4 @@ by Alex Liu et al.
 ## Resources
 - [Changelog](../master/CHANGELOG.md)
 - [Wiki](https://github.com/zohl/servant-auth-cookie/wiki)
+- [Example](https://github.com/sboehler/servant-starter-app)
