@@ -1,6 +1,36 @@
 # Change Log
 
 ## [HEAD]
+## [0.6.0] - 2017-11-08
+### Added
+- `getHeaderSession` function to access session data without denying access to a route (issue #30).
+- `cookied`function:
+  - support for multiple-parametered handlers (issue #34).
+  - `CookiedWrapper` type synonym and `CookieWrapperClass` class to ease work with the function (issue #38).
+
+- Support for session cookies (issue #35):
+  - `ssExpirationType` of `SessionSetting` record
+  - `ExpirationType` datatype
+
+- Support for refreshing cookies (issue #37):
+  - `ssAutoRenew` of `SessionSetting` record
+
+- Type synonyms for common boilerplates:
+  - `AuthCookieExceptionHandler`
+  - `AuthCookieHandler`
+
+### Changed
+- `cookied` function's signature, added argument of type `Proxy Session`.
+- `addSession*` functions' signatures, added argument of `SessionSettings` type. Use `def` (from `Data.Default`) for fallback mode.
+- Fixed bug with wrong time format in `removeSession*` functions (issue #39).
+- Refactored internals:
+  - Format of encoding cookies is different.
+  - `Cookie` record is completely changed.
+  - `WithMetadata` replaced with `PayloadWrapper`/`ExtendedPayloadWrapper`. Use the latter one in cookie handlers.
+  - `encryptCookie`/`decryptCookie` merged with their session counterparts.
+
+### Removed
+- `acsExpirationFormat` field and `CannotParseExpirationTime` exception constructor are no longer needed.
 
 ## [0.5.0.5] - 2017-07-13
 ### Changed
