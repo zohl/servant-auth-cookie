@@ -32,6 +32,10 @@
 ### Removed
 - `acsExpirationFormat` field and `CannotParseExpirationTime` exception constructor are no longer needed.
 
+## [0.5.0.7] - 2017-11-08
+### Changed
+- Fixed dependencies' bounds.
+
 ## [0.5.0.6] - 2017-10-23
 ### Changed
 - Fixed dependencies' bounds.
@@ -156,7 +160,8 @@
 
 
 [HEAD]:    ../../compare/v0.6.0...HEAD
-[0.6.0]:   ../../compare/v0.5.0.6...v0.6.0
+[0.6.0]:   ../../compare/v0.5.0.7...v0.6.0
+[0.5.0.7]: ../../compare/v0.5.0.6...v0.5.0.7
 [0.5.0.6]: ../../compare/v0.5.0.5...v0.5.0.6
 [0.5.0.5]: ../../compare/v0.5.0.4...v0.5.0.5
 [0.5.0.4]: ../../compare/v0.5.0.3...v0.5.0.4

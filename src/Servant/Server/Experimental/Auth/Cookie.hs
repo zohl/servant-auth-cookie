@@ -171,17 +171,16 @@ import Servant.API.ResponseHeaders (Headers)
 import qualified Servant.API.Header as S(Header)
 #endif
 
-#if MIN_VERSION_http_types(0,9,2)
-import Network.HTTP.Types (hSetCookie)
+#if MIN_VERSION_http_types(0,10,0)
+import Network.HTTP.Types.Header (hSetCookie)
 #endif
-
 
 #if MIN_VERSION_servant(0,7,0)
 #else
 type Handler = ExceptT ServantErr IO
 #endif
 
-#if MIN_VERSION_http_types(0,9,2)
+#if MIN_VERSION_http_types(0,10,0)
 #else
 hSetCookie :: HeaderName
 hSetCookie = "Set-Cookie"
