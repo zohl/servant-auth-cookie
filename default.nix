@@ -8,7 +8,7 @@
 }:
 mkDerivation {
   pname = "servant-auth-cookie";
-  version = "0.6.0";
+  version = "0.6.0.1";
   src = ./.;
   configureFlags = [ "-fbuild-examples" "-fdev" "-fservant91" ];
   isLibrary = true;

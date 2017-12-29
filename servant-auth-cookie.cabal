@@ -1,5 +1,5 @@
 name:                servant-auth-cookie
-version:             0.6.0
+version:             0.6.0.1
 synopsis:            Authentication via encrypted cookies
 description:         Authentication via encrypted client-side cookies,
                      inspired by client-session library by Michael Snoyman and based on
@@ -91,6 +91,8 @@ test-suite tests
   type:           exitcode-stdio-1.0
   hs-source-dirs: tests
   main-is:        Main.hs
+  other-modules:  Utils
+
   if flag(dev)
     ghc-options:      -Wall -Werror
   else

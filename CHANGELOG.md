@@ -1,6 +1,10 @@
 # Change Log
 
 ## [HEAD]
+## [0.6.0.1] - 2017-12-29
+### Changed
+- Fixed module `tests/Utils` export.
+
 ## [0.6.0] - 2017-11-08
 ### Added
 - `getHeaderSession` function to access session data without denying access to a route (issue #30).
@@ -159,7 +163,8 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.6.0...HEAD
+[HEAD]:    ../../compare/v0.6.0.1...HEAD
+[0.6.0.1]: ../../compare/v0.6.0...v0.6.0.1
 [0.6.0]:   ../../compare/v0.5.0.7...v0.6.0
 [0.5.0.7]: ../../compare/v0.5.0.6...v0.5.0.7
 [0.5.0.6]: ../../compare/v0.5.0.5...v0.5.0.6
