@@ -154,10 +154,6 @@ import qualified Network.HTTP.Types as N(Header)
 import Control.Applicative
 #endif
 
-#if MIN_VERSION_servant(0,7,0)
-import Servant.Server (Handler)
-#endif
-
 #if MIN_VERSION_servant(0,9,0)
 import Servant (ToHttpApiData (..))
 import Data.Text (Text)
@@ -173,11 +169,6 @@ import qualified Servant.API.Header as S(Header)
 
 #if MIN_VERSION_http_types(0,10,0)
 import Network.HTTP.Types.Header (hSetCookie)
-#endif
-
-#if MIN_VERSION_servant(0,7,0)
-#else
-type Handler = ExceptT ServantErr IO
 #endif
 
 #if MIN_VERSION_http_types(0,10,0)
@@ -778,8 +769,8 @@ class CookiedWrapperClass f r c where
     -> r                                              -- ^ Wrapped function
 
 -- When no arguments left: add session header to result.
-instance (Serialize c)
-         => CookiedWrapperClass (Handler b) (Handler (Cookied b)) c where
+instance (Serialize c, MonadIO m, MonadThrow m)
+         => CookiedWrapperClass (m b) (m (Cookied b)) c where
   wrapCookied _               Nothing                    = fmap noHeader
   wrapCookied (acs, rs, k, _) (Just PayloadWrapper {..}) = (>>= addSession acs rs k pwSettings pwSession)
 
@@ -805,7 +796,7 @@ instance (Serialize c, CookiedWrapperClass b b' c)
 -- Default auth handler
 
 -- | Type for exception handler.
-type AuthCookieExceptionHandler = forall a. AuthCookieException -> Handler (Maybe (ExtendedPayloadWrapper a))
+type AuthCookieExceptionHandler m = forall a. AuthCookieException -> m (Maybe (ExtendedPayloadWrapper a))
 
 -- | Type for cookied handler.
 type AuthCookieHandler a

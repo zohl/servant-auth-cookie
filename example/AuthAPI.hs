@@ -232,7 +232,7 @@ server settings _generateKey rs sks =
     mwm <- getHeaderSession settings sks h `catch` handleEx
     return $ whoamiPage $ epwSession <$> mwm
     where
-      handleEx :: AuthCookieExceptionHandler
+      handleEx :: AuthCookieExceptionHandler Handler
       handleEx _ex = return Nothing
 #else
   servePrivate = servePrivate' . epwSession
@@ -265,7 +265,7 @@ authHandler acs sks = mkAuthHandler $ \request ->
     (throwError err403 {errBody = "No cookies"})
     (return)
   where
-    handleEx :: AuthCookieExceptionHandler
+    handleEx :: AuthCookieExceptionHandler Handler
     handleEx ex = throwError err403 {errBody = fromStrict . BSC8.pack $ show ex}
 
 -- | Authentication settings.
