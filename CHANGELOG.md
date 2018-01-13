@@ -1,6 +1,13 @@
 # Change Log
 
 ## [HEAD]
+## [0.6.0.2] - 2018-01-13
+### Added
+- `CookiedWrapperClass` supports `MonadIO`- and `MonadThrow`-constrained monads.
+### Changed
+- Fixed dependencies' bounds.
+- `AuthCookieExceptionHandler` requires type of underlying monad as parameter.
+
 ## [0.6.0.1] - 2017-12-29
 ### Changed
 - Fixed module `tests/Utils` export.
@@ -163,7 +170,8 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.6.0.1...HEAD
+[HEAD]:    ../../compare/v0.6.0.2...HEAD
+[0.6.0.2]: ../../compare/v0.6.0.1...v0.6.0.2
 [0.6.0.1]: ../../compare/v0.6.0...v0.6.0.1
 [0.6.0]:   ../../compare/v0.5.0.7...v0.6.0
 [0.5.0.7]: ../../compare/v0.5.0.6...v0.5.0.7
