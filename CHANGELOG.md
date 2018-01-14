@@ -1,6 +1,10 @@
 # Change Log
 
 ## [HEAD]
+## [0.6.0.3] - 2018-01-14
+### Changed
+- Fixed dependencies' bounds.
+
 ## [0.6.0.2] - 2018-01-13
 ### Added
 - `CookiedWrapperClass` supports `MonadIO`- and `MonadThrow`-constrained monads.
@@ -170,7 +174,8 @@
 - Initial version of the package.
 
 
-[HEAD]:    ../../compare/v0.6.0.2...HEAD
+[HEAD]:    ../../compare/v0.6.0.3...HEAD
+[0.6.0.3]: ../../compare/v0.6.0.2...v0.6.0.3
 [0.6.0.2]: ../../compare/v0.6.0.1...v0.6.0.2
 [0.6.0.1]: ../../compare/v0.6.0...v0.6.0.1
 [0.6.0]:   ../../compare/v0.5.0.7...v0.6.0

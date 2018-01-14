@@ -10,7 +10,6 @@ let
 
   haskellPackages_ = haskellPackages.override {
     overrides = self: super: {
-cereal-time = dontCheck (self.callPackage /home/user/src/haskell/_deps/cereal-time-0.1.0.0.nix {});
     };
   };
 
