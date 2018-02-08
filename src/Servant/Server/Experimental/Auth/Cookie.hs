@@ -476,7 +476,7 @@ data AuthCookieSettings where
   AuthCookieSettings :: (HashAlgorithm h, BlockCipher c) =>
     { acsSessionField :: ByteString
       -- ^ Name of a cookie which stores session object
-    , acsCookieFlags :: [ByteString]
+    , acsCookieFlags :: [(ByteString, ByteString)]
       -- ^ Session cookie's flags
     , acsMaxAge :: NominalDiffTime
       -- ^ For how long the cookie will be valid (corresponds to “Max-Age”
@@ -496,7 +496,7 @@ data AuthCookieSettings where
 instance Default AuthCookieSettings where
   def = AuthCookieSettings
     { acsSessionField = "Session"
-    , acsCookieFlags  = ["HttpOnly", "Secure"]
+    , acsCookieFlags  = [("HttpOnly",""), ("Secure","")]
     , acsMaxAge       = fromIntegral (12 * 3600 :: Integer) -- 12 hours
     , acsPath         = "/"
     , acsHashAlgorithm = Proxy :: Proxy SHA256
@@ -703,8 +703,7 @@ renderSession' AuthCookieSettings{..} (Tagged sessionBinary) expiration
   = toByteString . renderCookies
   $ (acsSessionField, sessionBinary)
   : ("Path", acsPath)
-  : ((maybe id (:) expiration)
-    $ ((,"") <$> acsCookieFlags))
+  : ((maybe id (:) expiration) acsCookieFlags)
 
 -- | Render session cookie to 'ByteString'.
 renderSession :: AddSession () ByteString
