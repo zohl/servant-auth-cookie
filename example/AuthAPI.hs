@@ -274,7 +274,7 @@ authHandler acs sks = mkAuthHandler $ \request ->
 -- production server, but is an obstacle if you want to check it without
 -- setting up TLS.
 authSettings :: AuthCookieSettings
-authSettings = def {acsCookieFlags = ["HttpOnly"]}
+authSettings = def {acsCookieFlags = [("HttpOnly","")]}
 
 -- | Application
 app :: (ServerKeySet s)
