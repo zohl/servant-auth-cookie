@@ -47,19 +47,19 @@ library
 
   build-depends: base           >= 4.7   && < 5.0
                , base64-bytestring
-               , blaze-builder  >= 0.4   && < 0.4.1
+               , blaze-builder  >= 0.4   && < 0.4.2
                , bytestring
                , cereal         >= 0.5   && < 0.6
                , cereal-time    >= 0.1   && < 0.2
                , cookie         >= 0.4.1 && < 0.5
-               , cryptonite     >= 0.14  && < 0.25
+               , cryptonite     >= 0.14  && < 0.26
                , data-default
                , exceptions     >= 0.8   && < 0.9
-               , http-types     >= 0.9   && < 0.12
+               , http-types     >= 0.9   && < 0.13
                , memory         >= 0.11  && < 0.15
                , mtl            >= 2.0   && < 3.0
-               , servant        >= 0.5   && < 0.13
-               , servant-server >= 0.5   && < 0.13
+               , servant        >= 0.5   && < 0.14
+               , servant-server >= 0.5   && < 0.14
                , tagged         == 0.8.*
                , text
                , time           >= 1.6   && < 1.8.1
@@ -102,13 +102,13 @@ test-suite tests
                , QuickCheck     >= 2.4  && < 3.0
                , bytestring
                , cereal         >= 0.5  && < 0.6
-               , cryptonite     >= 0.14 && < 0.25
+               , cryptonite     >= 0.14 && < 0.26
                , data-default
                , deepseq        >= 1.3  && < 1.5
                , exceptions
                , hspec          >= 2.0  && < 3.0
                , servant-auth-cookie
-               , servant-server >= 0.5  && < 0.13
+               , servant-server >= 0.5  && < 0.14
                , tagged         == 0.8.*
                , template-haskell
                , transformers   >= 0.4  && < 0.6
@@ -128,7 +128,7 @@ executable example
                  , blaze-markup   >= 0.7  && < 0.9
                  , bytestring
                  , cereal         >= 0.5  && < 0.6
-                 , cryptonite     >= 0.14 && < 0.25
+                 , cryptonite     >= 0.14 && < 0.26
                  , data-default
                  , directory
                  , exceptions
@@ -136,10 +136,10 @@ executable example
                  , http-media
                  , http-types     >= 0.9  && < 0.12
                  , mtl            >= 2.0  && < 3.0
-                 , servant        >= 0.5  && < 0.13
+                 , servant        >= 0.5  && < 0.14
                  , servant-auth-cookie
                  , servant-blaze  >= 0.5  && < 0.8
-                 , servant-server >= 0.5  && < 0.13
+                 , servant-server >= 0.5  && < 0.14
                  , text
                  , time
                  , transformers   >= 0.4  && < 0.6
@@ -185,7 +185,7 @@ test-suite example-tests
                  , cereal         >= 0.5  && < 0.6
                  , cookie
                  , exceptions
-                 , cryptonite     >= 0.14 && < 0.25
+                 , cryptonite     >= 0.14 && < 0.26
                  , data-default
                  , deepseq        >= 1.3  && < 1.5
                  , directory
@@ -198,7 +198,7 @@ test-suite example-tests
                  , QuickCheck     >= 2.4  && < 3.0
                  , servant-auth-cookie
                  , servant-blaze  >= 0.5  && < 0.8
-                 , servant-server >= 0.5  && < 0.13
+                 , servant-server >= 0.5  && < 0.14
                  , text
                  , time           >= 1.5  && < 1.8.1
                  , transformers   >= 0.4  && < 0.6
@@ -237,7 +237,7 @@ benchmark bench
   build-depends: base           >= 4.7     && < 5.0
                , bytestring
                , criterion      >= 0.6.2.1 && < 1.4
-               , cryptonite     >= 0.14    && < 0.25
+               , cryptonite     >= 0.14    && < 0.26
                , servant-auth-cookie
                , servant-server >= 0.5     && < 0.13
   if flag(dev)
