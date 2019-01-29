@@ -45,10 +45,7 @@ install:
  - cabal install -v --avoid-reinstalls servant-blaze hspec-wai --constraint='foundation < 0.0.5'
 
 script:
- - case "$CABALVER" in
-    "1.18") cabal configure --enable-tests --enable-library-coverage -v2 -f dev -f build-examples ;;
-    *)      cabal configure --enable-tests --enable-coverage -v2 -f dev -f build-examples ;;
-   esac
+ - cabal configure --enable-tests --enable-library-coverage -v2 -f dev -f build-examples
  - cabal build
  - cabal test --show-details=always
  - cabal sdist
