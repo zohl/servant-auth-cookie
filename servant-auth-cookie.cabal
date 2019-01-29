@@ -59,8 +59,8 @@ library
                , http-types     >= 0.9   && < 0.13
                , memory         >= 0.11  && < 0.15
                , mtl            >= 2.0   && < 3.0
-               , servant        >= 0.5   && < 0.15
-               , servant-server >= 0.5   && < 0.15
+               , servant        >= 0.5   && < 0.16
+               , servant-server >= 0.5   && < 0.16
                , tagged         == 0.8.*
                , text
                , time           >= 1.6   && < 1.8.1
@@ -77,12 +77,12 @@ library
   if flag(servant9)
     build-depends:
       servant >= 0.9,
-      http-api-data == 0.3.*
+      http-api-data == 0.4.*
   else
     if flag(servant91)
       build-depends:
         servant >= 0.9,
-        http-api-data == 0.3.*
+        http-api-data == 0.4.*
     else
       build-depends:
         servant < 0.9,
@@ -109,7 +109,7 @@ test-suite tests
                , exceptions
                , hspec          >= 2.0  && < 3.0
                , servant-auth-cookie
-               , servant-server >= 0.5  && < 0.15
+               , servant-server >= 0.5  && < 0.16
                , tagged         == 0.8.*
                , template-haskell
                , transformers   >= 0.4  && < 0.6
@@ -137,10 +137,10 @@ executable example
                  , http-media
                  , http-types     >= 0.9  && < 0.13
                  , mtl            >= 2.0  && < 3.0
-                 , servant        >= 0.5  && < 0.15
+                 , servant        >= 0.5  && < 0.16
                  , servant-auth-cookie
                  , servant-blaze  >= 0.5  && < 0.8
-                 , servant-server >= 0.5  && < 0.15
+                 , servant-server >= 0.5  && < 0.16
                  , text
                  , time
                  , transformers   >= 0.4  && < 0.6
@@ -149,7 +149,7 @@ executable example
     if flag(servant9)
       build-depends:
         servant >= 0.9,
-        http-api-data == 0.3.*
+        http-api-data == 0.4.*
       other-modules:
         AuthAPI
         FileKeySet
@@ -199,7 +199,7 @@ test-suite example-tests
                  , QuickCheck     >= 2.4  && < 3.0
                  , servant-auth-cookie
                  , servant-blaze  >= 0.5  && < 0.8
-                 , servant-server >= 0.5  && < 0.15
+                 , servant-server >= 0.5  && < 0.16
                  , text
                  , time           >= 1.5  && < 1.8.1
                  , transformers   >= 0.4  && < 0.6
@@ -208,12 +208,12 @@ test-suite example-tests
     if flag(servant9)
       build-depends:
         servant >= 0.9,
-        http-api-data == 0.3.*
+        http-api-data == 0.4.*
     else
       if flag(servant91)
         build-depends:
           servant >= 0.9.1,
-          http-api-data == 0.3.*
+          http-api-data == 0.4.*
       else
         build-depends:
           servant < 0.9,
@@ -240,7 +240,7 @@ benchmark bench
                , criterion      >= 0.6.2.1 && < 1.4
                , cryptonite     >= 0.14    && < 0.26
                , servant-auth-cookie
-               , servant-server >= 0.5     && < 0.15
+               , servant-server >= 0.5     && < 0.16
   if flag(dev)
     ghc-options:      -Wall -Werror
   else
