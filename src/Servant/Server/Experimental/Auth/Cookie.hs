@@ -121,6 +121,7 @@ import Crypto.Hash.Algorithms (SHA256)
 import Crypto.MAC.HMAC (HMAC)
 import Crypto.Random (DRG(..), drgNew)
 import Data.ByteString (ByteString)
+import Data.Coerce (coerce)
 import Data.Default
 import Data.IORef
 import Data.List (partition)
@@ -129,6 +130,7 @@ import Data.Monoid ((<>))
 import Data.Proxy
 import Data.Serialize (Serialize(..))
 import Data.Tagged (Tagged (..), retag)
+import Data.Text.Encoding (encodeUtf8)
 import Data.Time
 import Data.Time.Clock.Serialize ()
 import Data.Typeable
@@ -136,10 +138,11 @@ import GHC.Generics (Generic)
 import GHC.TypeLits (Symbol)
 import Network.HTTP.Types (hCookie, HeaderName, RequestHeaders, ResponseHeaders)
 import Network.Wai (Request, requestHeaders)
-import Servant (addHeader, ServantErr (..))
+import Servant (addHeader)
+import Servant.API (FromHttpApiData(..))
 import Servant.API.Experimental.Auth (AuthProtect)
 import Servant.API.ResponseHeaders (AddHeader)
-import Servant.Server (err403)
+import Servant.Server (ServerError(..), err403)
 import Servant.Server.Experimental.Auth
 import Web.Cookie
 import qualified Crypto.MAC.HMAC        as H
@@ -250,6 +253,9 @@ instance Serialize Cookie where
 -- | A newtype wrapper over 'ByteString'
 newtype EncryptedSession = EncryptedSession ByteString
   deriving (Eq, Show, Typeable)
+
+instance FromHttpApiData EncryptedSession where
+  parseUrlPiece = pure . coerce . encodeUtf8
 
 -- | An empty 'EncryptedSession'
 emptyEncryptedSession :: EncryptedSession
@@ -622,14 +628,14 @@ removeSession acs response =
 
 -- | Add cookie session to error allowing to set cookie even if response is
 -- not 200.
-addSessionToErr :: AddSession ServantErr ServantErr
+addSessionToErr :: AddSession ServerError ServerError
 addSessionToErr acs rs sk pwSettings pwSession err = do
   header <- renderSession acs rs sk pwSettings pwSession ()
   return err { errHeaders = (hSetCookie, header) : errHeaders err }
 
 -- | "Remove" a session by invalidating the cookie.
 -- Cookie expiry date is set at 0  and content is wiped
-removeSessionFromErr :: RemoveSession ServantErr ServantErr
+removeSessionFromErr :: RemoveSession ServerError ServerError
 removeSessionFromErr acs err =
   return $ err { errHeaders = (hSetCookie, renderExpiredSession acs) : errHeaders err }
 
